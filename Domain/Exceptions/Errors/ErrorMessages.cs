@@ -26,4 +26,6 @@ public static class ErrorMessages
     "Minimum age cannot be negative.";
     public const string RequiredField =
     "{0} is required."; // Placeholder for field name
+    public const string UserMinimumAge =
+    "User must be at least 12 years old.";
 }
