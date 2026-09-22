@@ -1,8 +1,10 @@
 ﻿namespace Domain.Models;
 
-public class Item // Represents an item that can be loaned, such as a board game
+public class Item // Represents an item (Boardgame) owned by a user and available for loan
 {
-    public int Id { get; set; }
-    public int BoardGameId { get; set; }
-    public int OwnerId { get; set; }
+    public Guid Id { get; private set; } = Guid.CreateVersion7();
+
+    public Guid BoardGameId { get; set; }
+
+    public Guid OwnerId { get; set; }
 }

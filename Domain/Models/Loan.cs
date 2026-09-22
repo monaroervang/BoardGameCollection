@@ -5,12 +5,12 @@ namespace Domain.Models;
 
 public class Loan // Represents a loan of an item to a borrower
 {
-    public int Id { get; set; }
+    public Guid Id { get; private set; } = Guid.CreateVersion7();
     public DateOnly LoanDate { get; set; }
     public DateOnly DueDate { get; set; }
     public DateOnly? ReturnDate { get; set; }
-    public int ItemId { get; set; }
-    public int BorrowerId { get; set; }
+    public Guid ItemId { get; set; }
+    public Guid BorrowerId { get; set; }
     public bool IsReturned => ReturnDate.HasValue;
 
     public bool IsOverdue
@@ -30,23 +30,18 @@ public class Loan // Represents a loan of an item to a borrower
     {
     }
 
-    public Loan(int id, DateOnly loanDate, DateOnly dueDate, int itemId, int borrowerId)
+    public Loan(
+    DateOnly loanDate,
+    DateOnly dueDate,
+    Guid itemId,
+    Guid borrowerId)
     {
-        if (loanDate < DateOnly.FromDateTime(DateTime.Today)) // Check if the loan date is in the past
-        {
+        if (loanDate < DateOnly.FromDateTime(DateTime.Today))
             throw new LoanDateInPastException();
-        }
 
-        if (dueDate <= loanDate) // Check if the due date is after the loan date
-        {
+        if (dueDate <= loanDate)
             throw new DueDateException();
-        }
 
-        if (itemId <= 0) // Check if the item is already loaned 
-        { throw new ItemAlreadyLoanedException();
-        }
-
-        Id = id;
         LoanDate = loanDate;
         DueDate = dueDate;
         ItemId = itemId;

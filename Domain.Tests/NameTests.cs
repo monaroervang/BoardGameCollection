@@ -32,4 +32,25 @@ public class NameTests
 
         Assert.Equal($"{fieldName} is required.", exception.Message);
     }
+
+    [Theory]
+    [InlineData("FirstName", 100)]
+    [InlineData("LastName", 100)]
+    public void Constructor_ShouldThrowMaxLengthExceededException_WhenFieldExceedsMaxLength(
+    string fieldName,
+    int maxLength)
+    {
+        // Arrange
+        var value = new string('A', maxLength + 1);
+
+        // Act & Assert
+        var exception = Assert.Throws<MaxLengthExceededException>(() =>
+            new Name(
+                fieldName == "FirstName" ? value : "John",
+                fieldName == "LastName" ? value : "Doe"));
+
+        Assert.Equal(
+            $"{fieldName} cannot exceed {maxLength} characters.",
+            exception.Message);
+    }
 }

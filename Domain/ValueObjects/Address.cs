@@ -41,6 +41,20 @@ public class Address
         {
             throw new RequiredFieldException(nameof(Country));
         }
+        if (street.Length > 150)
+            throw new MaxLengthExceededException(nameof(Street), 150);
+
+        if (houseNumber.Length > 20)
+            throw new MaxLengthExceededException(nameof(HouseNumber), 20);
+
+        if (postalCode.Length > 20)
+            throw new MaxLengthExceededException(nameof(PostalCode), 20);
+
+        if (city.Length > 100)
+            throw new MaxLengthExceededException(nameof(City), 100);
+
+        if (country.Length > 100)
+            throw new MaxLengthExceededException(nameof(Country), 100);
 
         Street = street;
         HouseNumber = houseNumber;

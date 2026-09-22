@@ -55,4 +55,31 @@ public class AddressTests
 
         Assert.Equal($"{fieldName} is required.", exception.Message);
     }
+
+    [Theory]
+    [InlineData("Street", 150)]
+    [InlineData("HouseNumber", 20)]
+    [InlineData("PostalCode", 20)]
+    [InlineData("City", 100)]
+    [InlineData("Country", 100)]
+    public void Constructor_ShouldThrowMaxLengthExceededException_WhenFieldExceedsMaxLength(
+    string fieldName,
+    int maxLength)
+    {
+        // Arrange
+        var value = new string('A', maxLength + 1);
+
+        // Act & Assert
+        var exception = Assert.Throws<MaxLengthExceededException>(() =>
+            new Address(
+                fieldName == "Street" ? value : "Test Street",
+                fieldName == "HouseNumber" ? value : "1",
+                fieldName == "PostalCode" ? value : "9000",
+                fieldName == "City" ? value : "Aalborg",
+                fieldName == "Country" ? value : "Denmark"));
+
+        Assert.Equal(
+            $"{fieldName} cannot exceed {maxLength} characters.",
+            exception.Message);
+    }
 }

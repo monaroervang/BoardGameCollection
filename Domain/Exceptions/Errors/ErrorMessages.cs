@@ -28,4 +28,8 @@ public static class ErrorMessages
     "{0} is required."; // Placeholder for field name
     public const string UserMinimumAge =
     "User must be at least 12 years old.";
+    public const string MaxLengthExceeded =
+    "{0} cannot exceed {1} characters."; //Placeholder for first argument fieldname and second argument max length
+    public const string InvalidEmail =
+    "Email address is not valid.";
 }

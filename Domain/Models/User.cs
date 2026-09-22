@@ -3,10 +3,10 @@ using Domain.ValueObjects;
 
 public class User
 {
-    public int Id { get; set; }
+    public Guid Id { get; private set; } = Guid.CreateVersion7();
     public string Username { get; set; }
     public Name Name { get; set; }
-    public string Email { get; set; }
+    public Email Email { get; set; }
     public DateOnly DateOfBirth { get; set; }
     public Address Address { get; set; }
 
@@ -15,21 +15,15 @@ public class User
     }
 
     public User(
-    int id,
     string username,
     Name name,
-    string email,
+    Email email,
     DateOnly dateOfBirth,
     Address address)
     {
         if (string.IsNullOrWhiteSpace(username))
         {
             throw new RequiredFieldException(nameof(Username));
-        }
-
-        if (string.IsNullOrWhiteSpace(email))
-        {
-            throw new RequiredFieldException(nameof(Email));
         }
 
         var today = DateOnly.FromDateTime(DateTime.Today);
@@ -40,7 +34,9 @@ public class User
             throw new UserMinimumAgeException();
         }
 
-        Id = id;
+        if (username.Length > 50)
+            throw new MaxLengthExceededException(nameof(Username), 50);
+
         Username = username;
         Name = name;
         Email = email;

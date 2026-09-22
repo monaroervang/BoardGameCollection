@@ -11,6 +11,7 @@ public class UserTests
     {
         // Arrange
         var name = new Name("Anna", "Jensen");
+        var email = new Email("anna@example.com");
         var address = new Address(
             "Testvej",
             "10",
@@ -24,18 +25,16 @@ public class UserTests
 
         // Act
         var user = new User(
-            1,
             "annaj",
             name,
-            "anna@example.com",
+            email,
             dateOfBirth,
             address);
 
         // Assert
-        Assert.Equal(1, user.Id);
         Assert.Equal("annaj", user.Username);
         Assert.Equal(name, user.Name);
-        Assert.Equal("anna@example.com", user.Email);
+        Assert.Equal(email, user.Email);
         Assert.Equal(dateOfBirth, user.DateOfBirth);
         Assert.Equal(address, user.Address);
     }
@@ -45,6 +44,7 @@ public class UserTests
     {
         // Arrange
         var name = new Name("Anna", "Jensen");
+        var email = new Email("anna@example.com");
         var address = new Address(
             "Testvej",
             "10",
@@ -59,18 +59,19 @@ public class UserTests
         // Act & Assert
         Assert.Throws<UserMinimumAgeException>(() =>
             new User(
-                1,
                 "annaj",
                 name,
-                "anna@example.com",
+                email,
                 dateOfBirth,
                 address));
     }
+
     [Fact]
     public void Constructor_ShouldCreateUser_WhenUserIsExactly12()
     {
         // Arrange
         var name = new Name("Anna", "Jensen");
+        var email = new Email("anna@example.com");
         var address = new Address(
             "Testvej",
             "10",
@@ -84,24 +85,22 @@ public class UserTests
 
         // Act
         var user = new User(
-            1,
             "annaj",
             name,
-            "anna@example.com",
+            email,
             dateOfBirth,
             address);
 
         // Assert
         Assert.Equal(dateOfBirth, user.DateOfBirth);
     }
-    [Theory]
-    [InlineData(nameof(User.Username))]
-    [InlineData(nameof(User.Email))]
-    public void Constructor_ShouldThrowRequiredFieldException_WhenRequiredFieldIsEmpty(
-    string fieldName)
+
+    [Fact]
+    public void Constructor_ShouldThrowRequiredFieldException_WhenUsernameIsEmpty()
     {
         // Arrange
         var name = new Name("Anna", "Jensen");
+        var email = new Email("anna@example.com");
         var address = new Address(
             "Testvej",
             "10",
@@ -109,33 +108,51 @@ public class UserTests
             "Aalborg",
             "Denmark");
 
-        var username = "annaj";
-        var email = "anna@example.com";
         var dateOfBirth = DateOnly
             .FromDateTime(DateTime.Today)
             .AddYears(-20);
 
-        switch (fieldName)
-        {
-            case nameof(User.Username):
-                username = "";
-                break;
-
-            case nameof(User.Email):
-                email = "";
-                break;
-        }
-
         // Act & Assert
         var exception = Assert.Throws<RequiredFieldException>(() =>
             new User(
-                1,
+                "",
+                name,
+                email,
+                dateOfBirth,
+                address));
+
+        Assert.Equal("Username is required.", exception.Message);
+    }
+
+    [Fact]
+    public void Constructor_ShouldThrowMaxLengthExceededException_WhenUsernameExceedsMaxLength()
+    {
+        // Arrange
+        var username = new string('A', 51);
+        var name = new Name("John", "Doe");
+        var email = new Email("john@example.com");
+        var address = new Address(
+            "Test Street",
+            "1",
+            "9000",
+            "Aalborg",
+            "Denmark");
+
+        var dateOfBirth = DateOnly
+            .FromDateTime(DateTime.Today)
+            .AddYears(-20);
+
+        // Act & Assert
+        var exception = Assert.Throws<MaxLengthExceededException>(() =>
+            new User(
                 username,
                 name,
                 email,
                 dateOfBirth,
                 address));
 
-        Assert.Equal($"{fieldName} is required.", exception.Message);
+        Assert.Equal(
+            "Username cannot exceed 50 characters.",
+            exception.Message);
     }
 }

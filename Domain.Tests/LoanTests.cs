@@ -5,22 +5,26 @@ namespace Domain.Tests;
 
 public class LoanTests
 {
+    private static Guid CreateItemId() => Guid.CreateVersion7();
+    private static Guid CreateBorrowerId() => Guid.CreateVersion7();
+
     [Fact]
     public void Constructor_ShouldCreateLoan_WhenDatesAreValid()
     {
         // Arrange
         var loanDate = DateOnly.FromDateTime(DateTime.Today); 
         var dueDate = loanDate.AddDays(7);
+        var itemId = Guid.CreateVersion7();
+        var borrowerId = Guid.CreateVersion7();
 
         // Act
-        var loan = new Loan(1, loanDate, dueDate, 10, 20); // Create a new loan with valid dates
+        var loan = new Loan( loanDate, dueDate, itemId, borrowerId); // Create a new loan with valid dates
 
         // Assert
-        Assert.Equal(1, loan.Id); // Check if the loan ID is set correctly
         Assert.Equal(loanDate, loan.LoanDate);
         Assert.Equal(dueDate, loan.DueDate);    
-        Assert.Equal(10, loan.ItemId);
-        Assert.Equal(20, loan.BorrowerId);
+        Assert.Equal(itemId, loan.ItemId);
+        Assert.Equal(borrowerId, loan.BorrowerId);
         Assert.Null(loan.ReturnDate);
     }
 
@@ -30,10 +34,12 @@ public class LoanTests
         // Arrange
         var loanDate = DateOnly.FromDateTime(DateTime.Today).AddDays(-1);
         var dueDate = DateOnly.FromDateTime(DateTime.Today).AddDays(7);
+        var itemId = Guid.CreateVersion7();
+        var borrowerId = Guid.CreateVersion7();
 
         // Act & Assert
         Assert.Throws<LoanDateInPastException>(() => 
-            new Loan(1, loanDate, dueDate, 10, 20)); // Expect a LoanDateInPastException to be thrown or failed test
+            new Loan(loanDate, dueDate, itemId, borrowerId)); // Expect a LoanDateInPastException to be thrown or failed test
     }
 
     [Fact]
@@ -42,10 +48,13 @@ public class LoanTests
         // Arrange
         var loanDate = DateOnly.FromDateTime(DateTime.Today);
         var dueDate = loanDate; //  Set due date to be the same as loan date
+        var itemId = Guid.CreateVersion7();
+        var borrowerId = Guid.CreateVersion7();
+
 
         // Act & Assert
         Assert.Throws<DueDateException>(() =>
-            new Loan(1, loanDate, dueDate, 10, 20)); // Expect a DueDateException to be thrown or failed test
+            new Loan(loanDate, dueDate, itemId, borrowerId)); // Expect a DueDateException to be thrown or failed test
     }
 
     [Fact]
@@ -54,7 +63,12 @@ public class LoanTests
         // Arrange
         var loanDate = DateOnly.FromDateTime(DateTime.Today);
         var dueDate = loanDate.AddDays(7); //   Set due date to be 7 days after loan date
-        var loan = new Loan(1, loanDate, dueDate, 10, 20); //   Create a new loan with valid dates
+        var itemId = Guid.CreateVersion7();
+        var borrowerId = Guid.CreateVersion7();
+
+
+
+        var loan = new Loan(loanDate, dueDate, itemId, borrowerId); //   Create a new loan with valid dates
 
         var returnDate = loanDate.AddDays(5); //   Set return date to be 5 days after loan date
 
@@ -71,7 +85,10 @@ public class LoanTests
         // Arrange
         var loanDate = DateOnly.FromDateTime(DateTime.Today);
         var dueDate = loanDate.AddDays(7);
-        var loan = new Loan(1, loanDate, dueDate, 10, 20); //   Create a new loan with valid dates
+        var itemId = Guid.CreateVersion7();
+        var borrowerId = Guid.CreateVersion7();
+
+        var loan = new Loan(loanDate, dueDate, itemId, borrowerId); //   Create a new loan with valid dates
 
         var returnDate = loanDate.AddDays(-1); //   Set return date to be before loan date
 
@@ -85,7 +102,9 @@ public class LoanTests
         // Arrange
         var loanDate = DateOnly.FromDateTime(DateTime.Today);
         var dueDate = loanDate.AddDays(7);
-        var loan = new Loan(1, loanDate, dueDate, 10, 20); //   Create a new loan with valid dates
+        var itemId = Guid.CreateVersion7();
+        var borrowerId = Guid.CreateVersion7();
+        var loan = new Loan(loanDate, dueDate, itemId, borrowerId); //   Create a new loan with valid dates
 
         // Act
         loan.ReturnLoan(loanDate.AddDays(3)); //  Call the ReturnLoan method to set the return date
@@ -100,7 +119,9 @@ public class LoanTests
         // Arrange
         var loanDate = DateOnly.FromDateTime(DateTime.Today);
         var dueDate = loanDate.AddDays(7); //   Set due date to be 7 days after loan date
-        var loan = new Loan(1, loanDate, dueDate, 10, 20);
+        var itemId = Guid.CreateVersion7();
+        var borrowerId = Guid.CreateVersion7();
+        var loan = new Loan(loanDate, dueDate, itemId, borrowerId);
 
         // Act
         loan.ReturnLoan(dueDate.AddDays(2)); // Call the ReturnLoan method to set the return date after the due date
@@ -134,7 +155,9 @@ public class LoanTests
         // Arrange
         var loanDate = DateOnly.FromDateTime(DateTime.Today);
         var dueDate = loanDate.AddDays(7); //   Set due date to be 7 days after loan date
-        var loan = new Loan(1, loanDate, dueDate, 10, 20); //   Create a new loan with valid dates
+        var itemId = Guid.CreateVersion7();
+        var borrowerId = Guid.CreateVersion7();
+        var loan = new Loan(loanDate, dueDate, itemId, borrowerId); //   Create a new loan with valid dates
 
         // Act
         loan.ReturnLoan(dueDate); // Call the ReturnLoan method to set the return date on the due date

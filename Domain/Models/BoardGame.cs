@@ -4,12 +4,12 @@ namespace Domain.Models;
 
 public class BoardGame // Represents a board game with its details
 {
-    public int Id { get; set; }
+    public Guid Id { get; private set; } = Guid.CreateVersion7(); // Unique identifier for the board game, generated using Version 7 UUID
     public string Title { get; set; }
     public string Description { get; set; }
     public string Genre { get; set; }
     public string Publisher { get; set; }
-    public string Edition { get; set; }
+    public string? Edition { get; set; }
     public int ReleaseYear { get; set; }
     public int MinPlayers { get; set; }
     public int MaxPlayers { get; set; }
@@ -21,12 +21,11 @@ public class BoardGame // Represents a board game with its details
     }
 
     public BoardGame(
-     int id,
      string title,
      string description,
      string genre,
      string publisher,
-     string edition,
+     string? edition,
      int releaseYear,
      int minPlayers,
      int maxPlayers,
@@ -53,10 +52,24 @@ public class BoardGame // Represents a board game with its details
         {
             throw new RequiredFieldException(nameof(Publisher));
         }
-
-        if (string.IsNullOrWhiteSpace(edition))
+        if (title.Length > 200)
         {
-            throw new RequiredFieldException(nameof(Edition));
+            throw new MaxLengthExceededException(nameof(Title), 200);
+        }
+
+        if (genre.Length > 50)
+        {
+            throw new MaxLengthExceededException(nameof(Genre), 50);
+        }
+
+        if (publisher.Length > 100)
+        {
+            throw new MaxLengthExceededException(nameof(Publisher), 100);
+        }
+
+        if (edition?.Length > 50)
+        {
+            throw new MaxLengthExceededException(nameof(Edition), 50);
         }
 
         // Validate player count
@@ -84,7 +97,6 @@ public class BoardGame // Represents a board game with its details
         }
 
         // Set properties after validation
-        Id = id;
         Title = title;
         Description = description;
         Genre = genre;

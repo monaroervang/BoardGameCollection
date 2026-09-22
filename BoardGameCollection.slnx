@@ -1,4 +1,11 @@
 <Solution>
+  <Folder Name="/docs/" />
+  <Folder Name="/docs/adr/">
+    <File Path="docs/adr/001-database-generated-integer-ids.md" />
+    <File Path="docs/adr/002-separate-domain-and-persistence-configuration.md" />
+    <File Path="docs/adr/003-application-generated-uuidv7-ids.md" />
+  </Folder>
   <Project Path="Domain.Tests/Domain.Tests.csproj" />
   <Project Path="Domain/Domain.csproj" />
+  <Project Path="Persistence/Persistence.csproj" />
 </Solution>

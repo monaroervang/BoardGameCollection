@@ -19,6 +19,12 @@ public class Name
             throw new RequiredFieldException(nameof(LastName));
         }
 
+        if (firstName.Length > 100)
+            throw new MaxLengthExceededException(nameof(FirstName), 100);
+
+        if (lastName.Length > 100)
+            throw new MaxLengthExceededException(nameof(LastName), 100);
+
         FirstName = firstName;
         LastName = lastName;
     }
