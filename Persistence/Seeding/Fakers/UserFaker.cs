@@ -9,7 +9,7 @@ public static class UserFaker //Provides a static class for generating fake User
 {
     public static List<User> Generate(int count) //Generates a list of User objects with the specified count, using the Bogus library to generate random data for the properties of the User class
     {
-        var faker = new Faker("da"); //Create a new instance of the Faker class, specifying the locale as "da" (Danish) to generate data in Danish format
+        var faker = new Faker("en"); //Create a new instance of the Faker class, specifying the locale as "en" (English) to generate data in English format
         faker.Random = new Randomizer(12345); //Set the Random property of the Faker instance to a new Randomizer with a seed value of 12345, ensuring that the generated data is deterministic and reproducible
 
         var users = new List<User>();

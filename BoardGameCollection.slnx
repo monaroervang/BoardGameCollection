@@ -7,5 +7,6 @@
   </Folder>
   <Project Path="Domain.Tests/Domain.Tests.csproj" />
   <Project Path="Domain/Domain.csproj" />
+  <Project Path="Persistence.Tests/Persistence.Tests.csproj" />
   <Project Path="Persistence/Persistence.csproj" />
 </Solution>
