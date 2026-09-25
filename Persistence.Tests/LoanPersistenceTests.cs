@@ -49,11 +49,8 @@ public class LoanPersistenceTests
             90,
             10);
 
-        var item = new Item
-        {
-            BoardGameId = boardGame.Id,
-            OwnerId = owner.Id
-        };
+        // Create a physical copy owned by the existing user.
+        var item = new Item(boardGame.Id, owner.Id);
 
         var today = DateOnly.FromDateTime(DateTime.Today);
 
@@ -122,11 +119,10 @@ public class LoanPersistenceTests
             90,
             10);
 
-        var item = new Item
-        {
-            BoardGameId = boardGame.Id,
-            OwnerId = Guid.CreateVersion7()
-        };
+        // Use a non-existing owner ID to test the foreign key constraint.
+        var item = new Item(
+            boardGame.Id,
+            Guid.CreateVersion7());
 
         await using var context = new BoardGameDbContext(options);
 

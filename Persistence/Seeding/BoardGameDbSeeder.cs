@@ -105,13 +105,7 @@ public class BoardGameDbSeeder
             var owner = faker.PickRandom(users);
             var boardGame = faker.PickRandom(boardGames);
 
-            var item = new Item
-            {
-                OwnerId = owner.Id,
-                BoardGameId = boardGame.Id
-            };
-
-            items.Add(item);
+            items.Add(new Item(boardGame.Id, owner.Id));
         }
 
         await _context.Items.AddRangeAsync(items);
@@ -150,73 +144,49 @@ public class BoardGameDbSeeder
             var boardGame = boardGames.Single(
                 game => game.Id == item.BoardGameId);
 
-            // A borrower must not own the item and must meet
-            // the board game's minimum age requirement.
+            var status = faker.Random.Int(1, 100);
+
+            // Determine the loan dates before selecting a borrower.
+            DateOnly loanDate;
+            DateOnly dueDate;
+            DateOnly? returnDate = null;
+
+            if (status <= 65)
+            {
+                loanDate = today.AddDays(-faker.Random.Int(30, 365));
+                dueDate = loanDate.AddDays(14);
+                returnDate = loanDate.AddDays(faker.Random.Int(1, 21));
+            }
+            else if (status <= 85)
+            {
+                loanDate = today.AddDays(-faker.Random.Int(0, 10));
+                dueDate = today.AddDays(faker.Random.Int(1, 14));
+            }
+            else
+            {
+                loanDate = today.AddDays(-faker.Random.Int(20, 60));
+                dueDate = loanDate.AddDays(14);
+            }
+
+            // Check the borrower's age at the time of the loan.
             var eligibleBorrowers = users
                 .Where(user =>
                     user.Id != item.OwnerId &&
-                    user.DateOfBirth <= today.AddYears(-boardGame.MinimumAge))
+                    user.DateOfBirth <=
+                        loanDate.AddYears(-boardGame.MinimumAge))
                 .ToList();
 
             if (eligibleBorrowers.Count == 0)
                 continue;
 
             var borrower = faker.PickRandom(eligibleBorrowers);
-            var status = faker.Random.Int(1, 100);
 
-            Loan loan;
-            // Seed data uses the parameterless constructor to create historical loans.
-            // The regular constructor rejects loan dates in the past.
-            // This is intentional and only used for development data.
-
-            if (status <= 65)
-            {
-                // Returned historical loan.
-                var daysAgo = faker.Random.Int(30, 365);
-                var loanDate = today.AddDays(-daysAgo);
-                var dueDate = loanDate.AddDays(14);
-                var returnDate = loanDate.AddDays(
-                    faker.Random.Int(1, 21));
-
-                loan = new Loan
-                {
-                    LoanDate = loanDate,
-                    DueDate = dueDate,
-                    ItemId = item.Id,
-                    BorrowerId = borrower.Id
-                };
-
-                loan.ReturnLoan(returnDate);
-            }
-            else if (status <= 85)
-            {
-                // Active loan that is not overdue.
-                var loanDate = today.AddDays(
-                    -faker.Random.Int(0, 10));
-
-                loan = new Loan
-                {
-                    LoanDate = loanDate,
-                    DueDate = today.AddDays(
-                        faker.Random.Int(1, 14)),
-                    ItemId = item.Id,
-                    BorrowerId = borrower.Id
-                };
-            }
-            else
-            {
-                // Active overdue loan.
-                var loanDate = today.AddDays(
-                    -faker.Random.Int(20, 60));
-
-                loan = new Loan
-                {
-                    LoanDate = loanDate,
-                    DueDate = loanDate.AddDays(14),
-                    ItemId = item.Id,
-                    BorrowerId = borrower.Id
-                };
-            }
+            var loan = Loan.CreateHistorical(
+                loanDate,
+                dueDate,
+                item.Id,
+                borrower.Id,
+                returnDate);
 
             loans.Add(loan);
         }

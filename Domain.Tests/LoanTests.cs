@@ -136,11 +136,15 @@ public class LoanTests
         // Arrange
         // Uses the parameterless constructor to simulate an existing loan from the database.
         // This avoids the validation that prevents creating new loans with a past LoanDate.
-        var loan = new Loan
-        {
-            LoanDate = DateOnly.FromDateTime(DateTime.Today).AddDays(-10), // Set loan date to be 10 days in the past
-            DueDate = DateOnly.FromDateTime(DateTime.Today).AddDays(-3) // Set due date to be 3 days in the past
-        };
+        // Create a historical loan to test an overdue, unreturned loan.
+        var loanDate = DateOnly.FromDateTime(DateTime.Today).AddDays(-10);
+        var dueDate = DateOnly.FromDateTime(DateTime.Today).AddDays(-3);
+
+        var loan = Loan.CreateHistorical(
+            loanDate,
+            dueDate,
+            CreateItemId(),
+            CreateBorrowerId());
 
         // Act
         var result = loan.IsOverdue; // Check if the IsOverdue property is true when the loan is not returned and the due date has passed

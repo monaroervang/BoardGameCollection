@@ -5,32 +5,51 @@ namespace Domain.Models;
 public class BoardGame // Represents a board game with its details
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7(); // Unique identifier for the board game, generated using Version 7 UUID
-    public string Title { get; set; }
-    public string Description { get; set; }
-    public string Genre { get; set; }
-    public string Publisher { get; set; }
-    public string? Edition { get; set; }
-    public int ReleaseYear { get; set; }
-    public int MinPlayers { get; set; }
-    public int MaxPlayers { get; set; }
-    public int PlayingTimeMinutes { get; set; }
-    public int MinimumAge { get; set; }
+    public string Title { get; private set; } = "";
+    public string Description { get; private set; } = "";
+    public string Genre { get; private set; } = "";
+    public string Publisher { get; private set; } = "";
+    public string? Edition { get; private set; }
+    public int ReleaseYear { get; private set; }
+    public int MinPlayers { get; private set; }
+    public int MaxPlayers { get; private set; }
+    public int PlayingTimeMinutes { get; private set; }
+    public int MinimumAge { get; private set; }
 
     public BoardGame()
     {
+
     }
 
     public BoardGame(
-     string title,
-     string description,
-     string genre,
-     string publisher,
-     string? edition,
-     int releaseYear,
-     int minPlayers,
-     int maxPlayers,
-     int playingTimeMinutes,
-     int minimumAge)
+    string title,
+    string description,
+    string genre,
+    string publisher,
+    string? edition,
+    int releaseYear,
+    int minPlayers,
+    int maxPlayers,
+    int playingTimeMinutes,
+    int minimumAge)
+    {
+        Update(
+            title, description, genre, publisher, edition,
+            releaseYear, minPlayers, maxPlayers,
+            playingTimeMinutes, minimumAge);
+    }
+
+    public void Update(
+        string title,
+        string description,
+        string genre,
+        string publisher,
+        string? edition,
+        int releaseYear,
+        int minPlayers,
+        int maxPlayers,
+        int playingTimeMinutes,
+        int minimumAge)
     {
         // Validate required text fields
         if (string.IsNullOrWhiteSpace(title))
@@ -96,7 +115,6 @@ public class BoardGame // Represents a board game with its details
             throw new InvalidMinimumAgeException();
         }
 
-        // Set properties after validation
         Title = title;
         Description = description;
         Genre = genre;
@@ -108,4 +126,5 @@ public class BoardGame // Represents a board game with its details
         PlayingTimeMinutes = playingTimeMinutes;
         MinimumAge = minimumAge;
     }
+
 }

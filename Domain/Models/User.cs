@@ -4,13 +4,14 @@ using Domain.ValueObjects;
 public class User
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
-    public string Username { get; set; }
-    public Name Name { get; set; }
-    public Email Email { get; set; }
-    public DateOnly DateOfBirth { get; set; }
-    public Address Address { get; set; }
+    public string Username { get; private set; } = "";
+    public Name Name { get; private set; } = null!;
+    public Email Email { get; private set; } = null!;
+    public DateOnly DateOfBirth { get; private set; }
+    public Address Address { get; private set; } = null!;
 
-    public User()
+    // Used by EF Core when materializing users from the database.
+    private User()
     {
     }
 

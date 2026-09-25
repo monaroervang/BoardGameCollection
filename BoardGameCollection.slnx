@@ -5,8 +5,11 @@
     <File Path="docs/adr/002-separate-domain-and-persistence-configuration.md" />
     <File Path="docs/adr/003-application-generated-uuidv7-ids.md" />
   </Folder>
+  <Project Path="API.Tests/API.Tests.csproj" />
+  <Project Path="API/API.csproj" />
   <Project Path="Domain.Tests/Domain.Tests.csproj" />
   <Project Path="Domain/Domain.csproj" />
   <Project Path="Persistence.Tests/Persistence.Tests.csproj" />
   <Project Path="Persistence/Persistence.csproj" />
+  <Project Path="Shared/Shared.csproj" />
 </Solution>
