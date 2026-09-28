@@ -15,7 +15,8 @@ public sealed class DomainExceptionHandler : IExceptionHandler
         if (exception is not (
             InvalidPlayerCountException
             or RequiredFieldException
-            or MaxLengthExceededException))
+            or MaxLengthExceededException
+            or UserMinimumAgeException)) //My API integration tests caught this exception when trying to create a user with an age less than 12 years old.
         {
             return false;
         }

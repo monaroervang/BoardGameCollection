@@ -16,11 +16,21 @@ public class User
     }
 
     public User(
-    string username,
-    Name name,
-    Email email,
-    DateOnly dateOfBirth,
-    Address address)
+        string username,
+        Name name,
+        Email email,
+        DateOnly dateOfBirth,
+        Address address)
+    {
+        Update(username, name, email, dateOfBirth, address);
+    }
+
+    public void Update(
+        string username,
+        Name name,
+        Email email,
+        DateOnly dateOfBirth,
+        Address address)
     {
         if (string.IsNullOrWhiteSpace(username))
         {
@@ -36,7 +46,9 @@ public class User
         }
 
         if (username.Length > 50)
+        {
             throw new MaxLengthExceededException(nameof(Username), 50);
+        }
 
         Username = username;
         Name = name;
@@ -44,6 +56,4 @@ public class User
         DateOfBirth = dateOfBirth;
         Address = address;
     }
-
-
 }
