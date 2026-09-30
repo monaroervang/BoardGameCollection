@@ -16,8 +16,11 @@ public sealed class DomainExceptionHandler : IExceptionHandler
             InvalidPlayerCountException
             or RequiredFieldException
             or MaxLengthExceededException
-            or UserMinimumAgeException)) //My API integration tests caught this exception when trying to create a user with an age less than 12 years old.
-        {
+            or UserMinimumAgeException //My API integration tests caught this exception when trying to create a user with an age less than 12 years old.
+            or LoanDateInPastException
+            or DueDateException
+            or ReturnDateException))
+            {
             return false;
         }
 
