@@ -4,6 +4,7 @@ using Domain.ValueObjects;
 public class User
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
+    public byte[] RowVersion { get; private set; } = []; // Used for optimistic concurrency control
     public string Username { get; private set; } = "";
     public Name Name { get; private set; } = null!;
     public Email Email { get; private set; } = null!;

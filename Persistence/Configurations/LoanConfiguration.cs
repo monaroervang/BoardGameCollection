@@ -16,6 +16,10 @@ public class LoanConfiguration : IEntityTypeConfiguration<Loan>
         builder.Property(l => l.Id)
             .ValueGeneratedNever();
 
+        // Use SQL Server RowVersion for optimistic concurrency.
+        builder.Property(l => l.RowVersion)
+            .IsRowVersion();
+
         // Item relationship
         builder.HasOne<Item>()
             .WithMany()

@@ -1,4 +1,5 @@
-﻿namespace Shared.DTOs.Loans.Responses;
+﻿
+namespace Shared.DTOs.Loans.Responses;
 
 public sealed record LoanResponse
 {
@@ -10,4 +11,6 @@ public sealed record LoanResponse
     public Guid BorrowerId { get; init; }
     public bool IsReturned { get; init; }
     public bool IsOverdue { get; init; }
+
+    public byte[] RowVersion { get; init; } = [];
 }

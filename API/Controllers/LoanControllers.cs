@@ -177,6 +177,7 @@ public class LoanControllers : ControllerBase
             ToResponse(loan));
     }
 
+
     [HttpPost("{id:guid}/return")]
     [ProducesResponseType(typeof(LoanResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -193,6 +194,7 @@ public class LoanControllers : ControllerBase
             return NotFound();
         }
 
+        // A returned loan cannot be returned again.
         if (loan.IsReturned)
         {
             return Conflict(new ProblemDetails
@@ -202,13 +204,44 @@ public class LoanControllers : ControllerBase
             });
         }
 
+        // Require the version originally retrieved by the client.
+        if (request.RowVersion is null || request.RowVersion.Length != 8)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid RowVersion",
+                Detail = "A valid RowVersion is required when returning a loan."
+            });
+        }
+
+        // Use the client's original version for the concurrency check.
+        _context.Entry(loan)
+            .Property(l => l.RowVersion)
+            .OriginalValue = request.RowVersion;
+
         // Domain validates that the return date is not before the loan date.
         loan.ReturnLoan(request.ReturnDate);
 
-        await _context.SaveChangesAsync();
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Loan was modified",
+                Detail = "The loan has been modified by another request. Retrieve the latest version before returning it."
+            });
+        }
 
+        // Return the loan with its newly generated RowVersion.
         return Ok(ToResponse(loan));
     }
+
+
 
     private static LoanResponse ToResponse(Loan loan)
     {
@@ -221,7 +254,9 @@ public class LoanControllers : ControllerBase
             ItemId = loan.ItemId,
             BorrowerId = loan.BorrowerId,
             IsReturned = loan.IsReturned,
-            IsOverdue = loan.IsOverdue
+            IsOverdue = loan.IsOverdue,
+            RowVersion = loan.RowVersion
         };
     }
+
 }

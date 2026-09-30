@@ -17,6 +17,10 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.Id)
             .ValueGeneratedNever();
 
+        // Use SQL Server RowVersion for optimistic concurrency.
+        builder.Property(u => u.RowVersion)
+            .IsRowVersion();
+
         builder.Property(u => u.Username)
             .IsRequired()
             .HasMaxLength(50);

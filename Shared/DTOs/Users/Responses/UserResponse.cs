@@ -1,4 +1,5 @@
-﻿using Shared.DTOs.ValueObjects;
+﻿
+using Shared.DTOs.ValueObjects;
 
 namespace Shared.DTOs.Users.Responses;
 
@@ -10,4 +11,6 @@ public sealed record UserResponse
     public EmailDto Email { get; init; } = new();
     public DateOnly DateOfBirth { get; init; }
     public AddressDto Address { get; init; } = new();
+
+    public byte[] RowVersion { get; init; } = [];
 }

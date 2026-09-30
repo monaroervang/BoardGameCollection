@@ -231,7 +231,8 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
 
         var request = new ReturnLoanRequest
         {
-            ReturnDate = returnDate
+            ReturnDate = DateOnly.FromDateTime(DateTime.Today),
+            RowVersion = loan.RowVersion
         };
 
         // Act
@@ -261,6 +262,8 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
         Assert.NotNull(savedLoan);
         Assert.True(savedLoan.IsReturned);
         Assert.Equal(returnDate, savedLoan.ReturnDate);
+        Assert.Equal(8, returnedLoan.RowVersion.Length);
+        Assert.False(loan.RowVersion.SequenceEqual(returnedLoan.RowVersion)); // The RowVersion should have changed after the update.
     }
 
     [Fact]
@@ -273,7 +276,8 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
 
         var request = new ReturnLoanRequest
         {
-            ReturnDate = DateOnly.FromDateTime(DateTime.Today)
+            ReturnDate = DateOnly.FromDateTime(DateTime.Today),
+            RowVersion = loan.RowVersion
         };
 
         var firstResponse = await _client.PostAsJsonAsync(
@@ -479,4 +483,96 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
         Assert.Single(loans,
             loan => loan.ItemId == item.Id && !loan.IsReturned);
     }
+
+
+    [Fact]
+    public async Task ReturnLoan_WithoutRowVersion_ShouldReturnBadRequest()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        var loan = await CreateLoanAsync();
+
+        var request = new ReturnLoanRequest
+        {
+            ReturnDate = DateOnly.FromDateTime(DateTime.Today),
+            RowVersion = []
+        };
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            $"/api/loans/{loan.Id}/return",
+            request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        // Verify that the loan is still active.
+        var getResponse = await _client.GetAsync(
+            $"/api/loans/{loan.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+
+        var savedLoan = await getResponse.Content
+            .ReadFromJsonAsync<LoanResponse>();
+
+        Assert.NotNull(savedLoan);
+        Assert.False(savedLoan.IsReturned);
+        Assert.Null(savedLoan.ReturnDate);
+    }
+
+    [Fact]
+    public async Task ReturnLoan_WithStaleRowVersion_ShouldReturnConflict()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        var loan = await CreateLoanAsync();
+
+        var firstReturnDate = DateOnly.FromDateTime(DateTime.Today);
+        var secondReturnDate = firstReturnDate.AddDays(1);
+
+        // Both requests use the original RowVersion.
+        var firstRequest = new ReturnLoanRequest
+        {
+            ReturnDate = firstReturnDate,
+            RowVersion = loan.RowVersion
+        };
+
+        var secondRequest = new ReturnLoanRequest
+        {
+            ReturnDate = secondReturnDate,
+            RowVersion = loan.RowVersion
+        };
+
+        // Act: Return the loan successfully.
+        var firstResponse = await _client.PostAsJsonAsync(
+            $"/api/loans/{loan.Id}/return",
+            firstRequest);
+
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+
+        // Attempt another return using the outdated RowVersion.
+        var secondResponse = await _client.PostAsJsonAsync(
+            $"/api/loans/{loan.Id}/return",
+            secondRequest);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
+
+        // Verify that the original return date was preserved.
+        var getResponse = await _client.GetAsync(
+            $"/api/loans/{loan.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+
+        var savedLoan = await getResponse.Content
+            .ReadFromJsonAsync<LoanResponse>();
+
+        Assert.NotNull(savedLoan);
+        Assert.True(savedLoan.IsReturned);
+        Assert.Equal(firstReturnDate, savedLoan.ReturnDate);
+    }
+
+
 }

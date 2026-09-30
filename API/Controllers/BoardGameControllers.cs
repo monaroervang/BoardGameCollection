@@ -200,13 +200,51 @@ public class BoardGamesController : ControllerBase
         });
     }
 
+
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> DeleteBoardGame(Guid id)
+    public async Task<IActionResult> DeleteBoardGame(
+        Guid id,
+        [FromHeader(Name = "If-Match")] string? ifMatch)
     {
-        // Find the board game to delete.
+        // Require the RowVersion originally retrieved by the client.
+        if (string.IsNullOrWhiteSpace(ifMatch))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Missing RowVersion",
+                Detail = "The If-Match header is required when deleting a board game."
+            });
+        }
+
+        byte[] rowVersion;
+
+        try
+        {
+            // Decode the Base64-encoded RowVersion from the ETag.
+            var encodedVersion = ifMatch.Trim().Trim('"');
+            rowVersion = Convert.FromBase64String(encodedVersion);
+
+            if (rowVersion.Length != 8)
+            {
+                throw new FormatException();
+            }
+        }
+        catch (FormatException)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid RowVersion",
+                Detail = "If-Match must contain a valid Base64-encoded RowVersion."
+            });
+        }
+
+        // Find the existing board game.
         var boardGame = await _context.BoardGames
             .SingleOrDefaultAsync(game => game.Id == id);
 
@@ -229,9 +267,28 @@ public class BoardGamesController : ControllerBase
             });
         }
 
+        // Compare the client's original version with the database version.
+        _context.Entry(boardGame)
+            .Property(game => game.RowVersion)
+            .OriginalValue = rowVersion;
+
         _context.BoardGames.Remove(boardGame);
-        await _context.SaveChangesAsync();
+
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Board game was modified",
+                Detail = "The board game has been modified or deleted by another request. Retrieve the latest version before deleting."
+            });
+        }
 
         return NoContent();
     }
+
 }

@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Persistence.Repositories;
 using Shared.DTOs.Users.Responses;
@@ -24,13 +25,14 @@ public class UserControllers : ControllerBase
     [ProducesResponseType(typeof(List<UserResponse>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<UserResponse>>> GetUsers()
     {
+        // Return users without EF Core change tracking.
         var users = await _context.Users
             .AsNoTracking()
             .Select(user => new UserResponse
             {
                 Id = user.Id,
                 Username = user.Username,
-                Name = new NameDto  
+                Name = new NameDto
                 {
                     FirstName = user.Name.FirstName,
                     LastName = user.Name.LastName
@@ -43,9 +45,12 @@ public class UserControllers : ControllerBase
                 Address = new AddressDto
                 {
                     Street = user.Address.Street,
+                    HouseNumber = user.Address.HouseNumber,
+                    PostalCode = user.Address.PostalCode,
                     City = user.Address.City,
-                    PostalCode = user.Address.PostalCode
-                }
+                    Country = user.Address.Country
+                },
+                RowVersion = user.RowVersion
             })
             .ToListAsync();
 
@@ -55,9 +60,9 @@ public class UserControllers : ControllerBase
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(UserResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-
     public async Task<ActionResult<UserResponse>> GetUser(Guid id)
     {
+        // Retrieve a single user without change tracking.
         var user = await _context.Users
             .AsNoTracking()
             .Where(user => user.Id == id)
@@ -65,20 +70,16 @@ public class UserControllers : ControllerBase
             {
                 Id = user.Id,
                 Username = user.Username,
-
                 Name = new NameDto
                 {
                     FirstName = user.Name.FirstName,
                     LastName = user.Name.LastName
                 },
-
                 Email = new EmailDto
                 {
                     Value = user.Email.Value
                 },
-
                 DateOfBirth = user.DateOfBirth,
-
                 Address = new AddressDto
                 {
                     Street = user.Address.Street,
@@ -86,9 +87,10 @@ public class UserControllers : ControllerBase
                     PostalCode = user.Address.PostalCode,
                     City = user.Address.City,
                     Country = user.Address.Country
-                }
+                },
+                RowVersion = user.RowVersion
             })
-            .FirstOrDefaultAsync();
+            .SingleOrDefaultAsync();
 
         if (user is null)
         {
@@ -102,15 +104,14 @@ public class UserControllers : ControllerBase
     [ProducesResponseType(typeof(UserResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<UserResponse>> CreateUser(
-    CreateUserRequest request)
+        CreateUserRequest request)
     {
-        // Create the domain value objects from the request.
+        // Create domain value objects from the request.
         var name = new Name(
             request.Name.FirstName,
             request.Name.LastName);
 
-        var email = new Email(
-            request.Email.Value);
+        var email = new Email(request.Email.Value);
 
         var address = new Address(
             request.Address.Street,
@@ -128,35 +129,11 @@ public class UserControllers : ControllerBase
             address);
 
         _context.Users.Add(user);
+
+        // SQL Server generates RowVersion when the user is saved.
         await _context.SaveChangesAsync();
 
-        var response = new UserResponse
-        {
-            Id = user.Id,
-            Username = user.Username,
-
-            Name = new NameDto
-            {
-                FirstName = user.Name.FirstName,
-                LastName = user.Name.LastName
-            },
-
-            Email = new EmailDto
-            {
-                Value = user.Email.Value
-            },
-
-            DateOfBirth = user.DateOfBirth,
-
-            Address = new AddressDto
-            {
-                Street = user.Address.Street,
-                HouseNumber = user.Address.HouseNumber,
-                PostalCode = user.Address.PostalCode,
-                City = user.Address.City,
-                Country = user.Address.Country
-            }
-        };
+        var response = MapToResponse(user);
 
         return CreatedAtAction(
             nameof(GetUser),
@@ -168,9 +145,10 @@ public class UserControllers : ControllerBase
     [ProducesResponseType(typeof(UserResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<UserResponse>> UpdateUser(
-    Guid id,
-    UpdateUserRequest request)
+        Guid id,
+        UpdateUserRequest request)
     {
         var user = await _context.Users.FindAsync(id);
 
@@ -179,13 +157,28 @@ public class UserControllers : ControllerBase
             return NotFound();
         }
 
-        // Create the domain value objects from the request.
+        // Require the version originally retrieved by the client.
+        if (request.RowVersion is null || request.RowVersion.Length != 8)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid RowVersion",
+                Detail = "A valid RowVersion is required when updating a user."
+            });
+        }
+
+        // Use the client's original version for the concurrency check.
+        _context.Entry(user)
+            .Property(u => u.RowVersion)
+            .OriginalValue = request.RowVersion;
+
+        // Create domain value objects from the request.
         var name = new Name(
             request.Name.FirstName,
             request.Name.LastName);
 
-        var email = new Email(
-            request.Email.Value);
+        var email = new Email(request.Email.Value);
 
         var address = new Address(
             request.Address.Street,
@@ -194,7 +187,7 @@ public class UserControllers : ControllerBase
             request.Address.City,
             request.Address.Country);
 
-        // Let the domain entity handle its own update rules.
+        // Let the domain entity enforce its validation rules.
         user.Update(
             request.Username,
             name,
@@ -202,45 +195,67 @@ public class UserControllers : ControllerBase
             request.DateOfBirth,
             address);
 
-        await _context.SaveChangesAsync();
-
-        var response = new UserResponse
+        try
         {
-            Id = user.Id,
-            Username = user.Username,
-
-            Name = new NameDto
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new ProblemDetails
             {
-                FirstName = user.Name.FirstName,
-                LastName = user.Name.LastName
-            },
+                Status = StatusCodes.Status409Conflict,
+                Title = "User was modified",
+                Detail = "The user has been modified or deleted by another request. Retrieve the latest version before updating."
+            });
+        }
 
-            Email = new EmailDto
-            {
-                Value = user.Email.Value
-            },
-
-            DateOfBirth = user.DateOfBirth,
-
-            Address = new AddressDto
-            {
-                Street = user.Address.Street,
-                HouseNumber = user.Address.HouseNumber,
-                PostalCode = user.Address.PostalCode,
-                City = user.Address.City,
-                Country = user.Address.Country
-            }
-        };
-
-        return Ok(response);
+        // Return the updated user with the newly generated RowVersion.
+        return Ok(MapToResponse(user));
     }
 
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> DeleteUser(Guid id)
+    public async Task<IActionResult> DeleteUser(
+        Guid id,
+        [FromHeader(Name = "If-Match")] string? ifMatch)
     {
+        // Require the version originally retrieved by the client.
+        if (string.IsNullOrWhiteSpace(ifMatch))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Missing RowVersion",
+                Detail = "The If-Match header is required when deleting a user."
+            });
+        }
+
+        byte[] rowVersion;
+
+        try
+        {
+            // Decode the Base64-encoded RowVersion from the ETag.
+            var encodedVersion = ifMatch.Trim().Trim('"');
+            rowVersion = Convert.FromBase64String(encodedVersion);
+
+            if (rowVersion.Length != 8)
+            {
+                throw new FormatException();
+            }
+        }
+        catch (FormatException)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid RowVersion",
+                Detail = "If-Match must contain a valid Base64-encoded RowVersion."
+            });
+        }
+
         var user = await _context.Users.FindAsync(id);
 
         if (user is null)
@@ -248,6 +263,7 @@ public class UserControllers : ControllerBase
             return NotFound();
         }
 
+        // Prevent deletion when the user owns items or has loan history.
         var ownsItems = await _context.Items
             .AnyAsync(item => item.OwnerId == id);
 
@@ -264,9 +280,56 @@ public class UserControllers : ControllerBase
             });
         }
 
+        // Compare the client's original version with the database version.
+        _context.Entry(user)
+            .Property(u => u.RowVersion)
+            .OriginalValue = rowVersion;
+
         _context.Users.Remove(user);
-        await _context.SaveChangesAsync();
+
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "User was modified",
+                Detail = "The user has been modified or deleted by another request. Retrieve the latest version before deleting."
+            });
+        }
 
         return NoContent();
+    }
+
+    // Map a domain user to the response DTO.
+    private static UserResponse MapToResponse(User user)
+    {
+        return new UserResponse
+        {
+            Id = user.Id,
+            Username = user.Username,
+            Name = new NameDto
+            {
+                FirstName = user.Name.FirstName,
+                LastName = user.Name.LastName
+            },
+            Email = new EmailDto
+            {
+                Value = user.Email.Value
+            },
+            DateOfBirth = user.DateOfBirth,
+            Address = new AddressDto
+            {
+                Street = user.Address.Street,
+                HouseNumber = user.Address.HouseNumber,
+                PostalCode = user.Address.PostalCode,
+                City = user.Address.City,
+                Country = user.Address.Country
+            },
+            RowVersion = user.RowVersion
+        };
     }
 }

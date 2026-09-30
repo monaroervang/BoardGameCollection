@@ -143,30 +143,29 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
             savedBoardGame.RowVersion);
     }
 
+
     [Fact]
     public async Task DeleteBoardGame_ShouldReturnNoContent()
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
 
-        var createdBoardGame = await CreateBoardGameAsync();
+        var boardGame = await CreateBoardGameAsync();
+
+        using var request = CreateDeleteRequest(boardGame);
 
         // Act
-        var deleteResponse = await _client.DeleteAsync(
-            $"/api/boardgames/{createdBoardGame.Id}");
+        var response = await _client.SendAsync(request);
 
         // Assert
-        Assert.Equal(
-            HttpStatusCode.NoContent,
-            deleteResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
         var getResponse = await _client.GetAsync(
-            $"/api/boardgames/{createdBoardGame.Id}");
+            $"/api/boardgames/{boardGame.Id}");
 
-        Assert.Equal(
-            HttpStatusCode.NotFound,
-            getResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
     }
+
 
     [Fact]
     public async Task UpdateBoardGame_WithStaleRowVersion_ShouldReturnConflict()
@@ -323,4 +322,89 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
             RowVersion = boardGame.RowVersion
         };
     }
+
+    [Fact]
+    public async Task DeleteBoardGame_WithoutRowVersion_ShouldReturnBadRequest()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        var boardGame = await CreateBoardGameAsync();
+
+        // Act
+        var response = await _client.DeleteAsync(
+            $"/api/boardgames/{boardGame.Id}");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        // The board game must still exist.
+        var getResponse = await _client.GetAsync(
+            $"/api/boardgames/{boardGame.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteBoardGame_WithStaleRowVersion_ShouldReturnConflict()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        var original = await CreateBoardGameAsync();
+
+        // Another user updates the board game.
+        var updateRequest = CreateUpdateRequest(
+            original,
+            "Updated Before Delete");
+
+        var updateResponse = await _client.PutAsJsonAsync(
+            $"/api/boardgames/{original.Id}",
+            updateRequest);
+
+        Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
+
+        // Attempt deletion using the original, outdated version.
+        using var deleteRequest = CreateDeleteRequest(original);
+
+        // Act
+        var deleteResponse = await _client.SendAsync(deleteRequest);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Conflict, deleteResponse.StatusCode);
+
+        // The newer version must remain in the database.
+        var getResponse = await _client.GetAsync(
+            $"/api/boardgames/{original.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+
+        var saved = await getResponse.Content
+            .ReadFromJsonAsync<BoardGameResponse>();
+
+        Assert.NotNull(saved);
+        Assert.Equal("Updated Before Delete", saved.Title);
+
+
+    }
+
+    private static HttpRequestMessage CreateDeleteRequest(
+        BoardGameResponse boardGame)
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"/api/boardgames/{boardGame.Id}");
+
+        // Send the version originally retrieved by the client.
+        var encodedVersion = Convert.ToBase64String(
+            boardGame.RowVersion);
+
+        request.Headers.TryAddWithoutValidation(
+            "If-Match",
+            $"\"{encodedVersion}\"");
+
+        return request;
+    }
+
+
 }

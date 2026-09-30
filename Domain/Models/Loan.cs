@@ -12,6 +12,8 @@ public class Loan // Represents a loan of an item to a borrower
     public Guid ItemId { get; private set; }
     public Guid BorrowerId { get; private set; }
     public bool IsReturned => ReturnDate.HasValue;
+    // Used by EF Core for optimistic concurrency.
+    public byte[] RowVersion { get; private set; } = []; // Used for optimistic concurrency control
 
     public bool IsOverdue
     {

@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿
+using System.Net;
 using System.Net.Http.Json;
 using Shared.DTOs.Users.Requests;
 using Shared.DTOs.Users.Responses;
@@ -20,30 +21,24 @@ public class UsersApiTests : IClassFixture<BoardGameApiFactory>
     [Fact]
     public async Task GetUsers_ShouldReturnOk()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
-        // Act
         var response = await _client.GetAsync("/api/users");
 
-        // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
     public async Task CreateUser_ShouldReturnCreated()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
         var request = CreateValidUserRequest();
 
-        // Act
         var response = await _client.PostAsJsonAsync(
             "/api/users",
             request);
 
-        // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
         var user = await response.Content
@@ -57,7 +52,9 @@ public class UsersApiTests : IClassFixture<BoardGameApiFactory>
         Assert.Equal(request.Email.Value, user.Email.Value);
         Assert.Equal(request.Address.City, user.Address.City);
 
-        // Verify that the user was actually persisted.
+        // SQL Server must generate the initial RowVersion.
+        Assert.Equal(8, user.RowVersion.Length);
+
         var getResponse = await _client.GetAsync(
             $"/api/users/{user.Id}");
 
@@ -69,102 +66,43 @@ public class UsersApiTests : IClassFixture<BoardGameApiFactory>
         Assert.NotNull(savedUser);
         Assert.Equal(user.Id, savedUser.Id);
         Assert.Equal(request.Username, savedUser.Username);
+        Assert.Equal(user.RowVersion, savedUser.RowVersion);
     }
 
     [Fact]
     public async Task CreateUser_WhenUserIsTooYoung_ShouldReturnBadRequest()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
-        var request = new CreateUserRequest
+        var request = CreateValidUserRequest() with
         {
-            Username = $"young-{Guid.NewGuid():N}",
-
-            Name = new NameDto
-            {
-                FirstName = "Young",
-                LastName = "User"
-            },
-
-            Email = new EmailDto
-            {
-                Value = $"young-{Guid.NewGuid():N}@example.com"
-            },
-
             DateOfBirth = DateOnly
                 .FromDateTime(DateTime.Today)
-                .AddYears(-10),
-
-            Address = new AddressDto
-            {
-                Street = "Test Street",
-                HouseNumber = "10",
-                PostalCode = "5000",
-                City = "Odense",
-                Country = "Denmark"
-            }
+                .AddYears(-10)
         };
 
-        // Act
         var response = await _client.PostAsJsonAsync(
             "/api/users",
             request);
 
-        // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
     public async Task UpdateUser_ShouldReturnUpdatedUser()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
-        var createResponse = await _client.PostAsJsonAsync(
-            "/api/users",
-            CreateValidUserRequest());
+        var createdUser = await CreateUserAsync();
 
-        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        var updateRequest = CreateUpdateRequest(
+            createdUser,
+            $"updated-{Guid.NewGuid():N}");
 
-        var createdUser = await createResponse.Content
-            .ReadFromJsonAsync<UserResponse>();
-
-        Assert.NotNull(createdUser);
-
-        var updateRequest = new UpdateUserRequest
-        {
-            Username = $"updated-{Guid.NewGuid():N}",
-
-            Name = new NameDto
-            {
-                FirstName = "Updated",
-                LastName = "User"
-            },
-
-            Email = new EmailDto
-            {
-                Value = $"updated-{Guid.NewGuid():N}@example.com"
-            },
-
-            DateOfBirth = new DateOnly(1995, 5, 15),
-
-            Address = new AddressDto
-            {
-                Street = "Updated Street",
-                HouseNumber = "20",
-                PostalCode = "8000",
-                City = "Aarhus",
-                Country = "Denmark"
-            }
-        };
-
-        // Act
         var updateResponse = await _client.PutAsJsonAsync(
             $"/api/users/{createdUser.Id}",
             updateRequest);
 
-        // Assert
         Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
 
         var updatedUser = await updateResponse.Content
@@ -183,48 +121,110 @@ public class UsersApiTests : IClassFixture<BoardGameApiFactory>
             updateRequest.Address.City,
             updatedUser.Address.City);
 
-        // Verify that the changes were persisted.
+        // An update must generate a new RowVersion.
+        Assert.Equal(8, updatedUser.RowVersion.Length);
+        Assert.False(
+            createdUser.RowVersion.SequenceEqual(
+                updatedUser.RowVersion));
+
         var getResponse = await _client.GetAsync(
             $"/api/users/{createdUser.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
 
         var savedUser = await getResponse.Content
             .ReadFromJsonAsync<UserResponse>();
 
-        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
         Assert.NotNull(savedUser);
         Assert.Equal(updateRequest.Username, savedUser.Username);
         Assert.Equal(
             updateRequest.Address.Street,
             savedUser.Address.Street);
+        Assert.Equal(
+            updatedUser.RowVersion,
+            savedUser.RowVersion);
+    }
+
+    [Fact]
+    public async Task UpdateUser_WithoutRowVersion_ShouldReturnBadRequest()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var createdUser = await CreateUserAsync();
+
+        var updateRequest = CreateUpdateRequest(
+            createdUser,
+            "Updated Without Version") with
+        {
+            RowVersion = []
+        };
+
+        var response = await _client.PutAsJsonAsync(
+            $"/api/users/{createdUser.Id}",
+            updateRequest);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateUser_WithStaleRowVersion_ShouldReturnConflict()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var originalUser = await CreateUserAsync();
+
+        // Both requests use the same original RowVersion.
+        var firstUpdate = CreateUpdateRequest(
+            originalUser,
+            $"first-{Guid.NewGuid():N}");
+
+        var secondUpdate = CreateUpdateRequest(
+            originalUser,
+            $"second-{Guid.NewGuid():N}");
+
+        var firstResponse = await _client.PutAsJsonAsync(
+            $"/api/users/{originalUser.Id}",
+            firstUpdate);
+
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+
+        var secondResponse = await _client.PutAsJsonAsync(
+            $"/api/users/{originalUser.Id}",
+            secondUpdate);
+
+        Assert.Equal(
+            HttpStatusCode.Conflict,
+            secondResponse.StatusCode);
+
+        // The first update must remain in the database.
+        var getResponse = await _client.GetAsync(
+            $"/api/users/{originalUser.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+
+        var savedUser = await getResponse.Content
+            .ReadFromJsonAsync<UserResponse>();
+
+        Assert.NotNull(savedUser);
+        Assert.Equal(firstUpdate.Username, savedUser.Username);
+        Assert.NotEqual(secondUpdate.Username, savedUser.Username);
     }
 
     [Fact]
     public async Task DeleteUser_ShouldReturnNoContent()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
-        var createResponse = await _client.PostAsJsonAsync(
-            "/api/users",
-            CreateValidUserRequest());
+        var createdUser = await CreateUserAsync();
 
-        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        using var deleteRequest = CreateDeleteRequest(createdUser);
 
-        var createdUser = await createResponse.Content
-            .ReadFromJsonAsync<UserResponse>();
+        var deleteResponse = await _client.SendAsync(deleteRequest);
 
-        Assert.NotNull(createdUser);
-
-        // Act
-        var deleteResponse = await _client.DeleteAsync(
-            $"/api/users/{createdUser.Id}");
-
-        // Assert
         Assert.Equal(
             HttpStatusCode.NoContent,
             deleteResponse.StatusCode);
 
-        // Verify that the user was actually deleted.
         var getResponse = await _client.GetAsync(
             $"/api/users/{createdUser.Id}");
 
@@ -233,25 +233,83 @@ public class UsersApiTests : IClassFixture<BoardGameApiFactory>
             getResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task DeleteUser_WithoutRowVersion_ShouldReturnBadRequest()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var createdUser = await CreateUserAsync();
+
+        var deleteResponse = await _client.DeleteAsync(
+            $"/api/users/{createdUser.Id}");
+
+        Assert.Equal(
+            HttpStatusCode.BadRequest,
+            deleteResponse.StatusCode);
+
+        // The user must still exist.
+        var getResponse = await _client.GetAsync(
+            $"/api/users/{createdUser.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteUser_WithStaleRowVersion_ShouldReturnConflict()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var originalUser = await CreateUserAsync();
+
+        // Another request updates the user first.
+        var updateRequest = CreateUpdateRequest(
+            originalUser,
+            $"updated-{Guid.NewGuid():N}");
+
+        var updateResponse = await _client.PutAsJsonAsync(
+            $"/api/users/{originalUser.Id}",
+            updateRequest);
+
+        Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
+
+        // Attempt deletion using the outdated RowVersion.
+        using var deleteRequest = CreateDeleteRequest(originalUser);
+
+        var deleteResponse = await _client.SendAsync(deleteRequest);
+
+        Assert.Equal(
+            HttpStatusCode.Conflict,
+            deleteResponse.StatusCode);
+
+        // The updated user must still exist.
+        var getResponse = await _client.GetAsync(
+            $"/api/users/{originalUser.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+
+        var savedUser = await getResponse.Content
+            .ReadFromJsonAsync<UserResponse>();
+
+        Assert.NotNull(savedUser);
+        Assert.Equal(updateRequest.Username, savedUser.Username);
+    }
+
+    // Create a valid user with unique credentials.
     private static CreateUserRequest CreateValidUserRequest()
     {
         return new CreateUserRequest
         {
             Username = $"testuser-{Guid.NewGuid():N}",
-
             Name = new NameDto
             {
                 FirstName = "Test",
                 LastName = "User"
             },
-
             Email = new EmailDto
             {
                 Value = $"test-{Guid.NewGuid():N}@example.com"
             },
-
             DateOfBirth = new DateOnly(2000, 1, 1),
-
             Address = new AddressDto
             {
                 Street = "Test Street",
@@ -261,5 +319,71 @@ public class UsersApiTests : IClassFixture<BoardGameApiFactory>
                 Country = "Denmark"
             }
         };
+    }
+
+    // Create a user through the API and return its generated RowVersion.
+    private async Task<UserResponse> CreateUserAsync()
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/users",
+            CreateValidUserRequest());
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        var user = await response.Content
+            .ReadFromJsonAsync<UserResponse>();
+
+        Assert.NotNull(user);
+        Assert.Equal(8, user.RowVersion.Length);
+
+        return user;
+    }
+
+    // Build an update request with the originally retrieved RowVersion.
+    private static UpdateUserRequest CreateUpdateRequest(
+        UserResponse user,
+        string username)
+    {
+        return new UpdateUserRequest
+        {
+            Username = username,
+            Name = new NameDto
+            {
+                FirstName = "Updated",
+                LastName = "User"
+            },
+            Email = new EmailDto
+            {
+                Value = $"updated-{Guid.NewGuid():N}@example.com"
+            },
+            DateOfBirth = new DateOnly(1995, 5, 15),
+            Address = new AddressDto
+            {
+                Street = "Updated Street",
+                HouseNumber = "20",
+                PostalCode = "8000",
+                City = "Aarhus",
+                Country = "Denmark"
+            },
+            RowVersion = user.RowVersion
+        };
+    }
+
+    // Create a DELETE request containing the original RowVersion.
+    private static HttpRequestMessage CreateDeleteRequest(
+        UserResponse user)
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"/api/users/{user.Id}");
+
+        var encodedVersion = Convert.ToBase64String(
+            user.RowVersion);
+
+        request.Headers.TryAddWithoutValidation(
+            "If-Match",
+            $"\"{encodedVersion}\"");
+
+        return request;
     }
 }
