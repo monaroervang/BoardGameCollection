@@ -422,4 +422,61 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
 
         return user;
     }
+    [Fact]
+    public async Task CreateLoan_WhenRequestedConcurrently_ShouldAllowOnlyOneLoan()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        var item = await CreateItemAsync();
+        var firstBorrower = await CreateUserAsync();
+        var secondBorrower = await CreateUserAsync();
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+
+        var firstRequest = new CreateLoanRequest
+        {
+            LoanDate = today,
+            DueDate = today.AddDays(14),
+            ItemId = item.Id,
+            BorrowerId = firstBorrower.Id
+        };
+
+        var secondRequest = new CreateLoanRequest
+        {
+            LoanDate = today,
+            DueDate = today.AddDays(14),
+            ItemId = item.Id,
+            BorrowerId = secondBorrower.Id
+        };
+
+        // Act
+        var requests = new[]
+        {
+        _client.PostAsJsonAsync("/api/loans", firstRequest),
+        _client.PostAsJsonAsync("/api/loans", secondRequest)
+    };
+
+        var responses = await Task.WhenAll(requests);
+
+        // Assert
+        Assert.Single(responses,
+            response => response.StatusCode == HttpStatusCode.Created);
+
+        Assert.Single(responses,
+            response => response.StatusCode == HttpStatusCode.Conflict);
+
+        // Verify the database state through the API.
+        var getResponse = await _client.GetAsync("/api/loans");
+
+        getResponse.EnsureSuccessStatusCode();
+
+        var loans = await getResponse.Content
+            .ReadFromJsonAsync<List<LoanResponse>>();
+
+        Assert.NotNull(loans);
+
+        Assert.Single(loans,
+            loan => loan.ItemId == item.Id && !loan.IsReturned);
+    }
 }

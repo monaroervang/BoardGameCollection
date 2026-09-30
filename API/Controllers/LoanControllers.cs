@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Persistence.Repositories;
 using Shared.DTOs.Loans.Requests;
 using Shared.DTOs.Loans.Responses;
+using Microsoft.Data.SqlClient;
 
 namespace API.Controllers;
 
@@ -149,10 +150,28 @@ public class LoanControllers : ControllerBase
             request.ItemId,
             request.BorrowerId);
 
-        _context.Loans.Add(loan);
-        await _context.SaveChangesAsync();
+        _context.Loans.Add(loan); // Add the new loan to the context
 
-        return CreatedAtAction(
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) // Catch database update exceptions, such as unique constraint violations
+            when (ex.InnerException is SqlException sqlException // Check if the inner exception is a SQL exception
+                  && sqlException.Number is 2601 or 2627 // Check for unique constraint violation error codes
+                  && sqlException.Message.Contains( // Check if the error message contains the index name
+                      "IX_Loans_ItemId", // Index name for the unique constraint
+                      StringComparison.OrdinalIgnoreCase)) // Case-insensitive comparison
+        {
+            return Conflict(new ProblemDetails // Return a 409 Conflict response with details about the conflict
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Item is already borrowed",
+                Detail = "This item currently has an active loan."
+            });
+        }
+
+        return CreatedAtAction( // Return a 201 Created response with the location of the new loan
             nameof(GetLoan),
             new { id = loan.Id },
             ToResponse(loan));

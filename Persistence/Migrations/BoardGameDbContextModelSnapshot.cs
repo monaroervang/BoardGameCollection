@@ -61,6 +61,12 @@ namespace Persistence.Migrations
                     b.Property<int>("ReleaseYear")
                         .HasColumnType("int");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -115,7 +121,9 @@ namespace Persistence.Migrations
 
                     b.HasIndex("BorrowerId");
 
-                    b.HasIndex("ItemId");
+                    b.HasIndex("ItemId")
+                        .IsUnique()
+                        .HasFilter("[ReturnDate] IS NULL");
 
                     b.ToTable("Loans", (string)null);
                 });

@@ -15,6 +15,7 @@ public class BoardGame // Represents a board game with its details
     public int MaxPlayers { get; private set; }
     public int PlayingTimeMinutes { get; private set; }
     public int MinimumAge { get; private set; }
+    public byte[] RowVersion { get; private set; } = []; // For concurrency control, used by Entity Framework Core. SQL Server uses this to detect if the record has been modified since it was last read.
 
     public BoardGame()
     {

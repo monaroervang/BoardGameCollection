@@ -37,5 +37,8 @@ public class BoardGameConfiguration : IEntityTypeConfiguration<BoardGame> //Repr
         // Edition is optional
         builder.Property(bg => bg.Edition)
             .HasMaxLength(50);
+
+        builder.Property(boardGame => boardGame.RowVersion) // Configure the RowVersion property for concurrency control
+            .IsRowVersion();
     }
 }

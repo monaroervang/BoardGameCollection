@@ -20,7 +20,6 @@ public class BoardGamesController : ControllerBase
     }
 
     [HttpGet]
-    [HttpGet]
     public async Task<ActionResult<List<BoardGameResponse>>> GetBoardGames()
     {
         // Return board games as DTOs without EF Core change tracking.
@@ -38,7 +37,8 @@ public class BoardGamesController : ControllerBase
                 MinPlayers = game.MinPlayers,
                 MaxPlayers = game.MaxPlayers,
                 PlayingTimeMinutes = game.PlayingTimeMinutes,
-                MinimumAge = game.MinimumAge
+                MinimumAge = game.MinimumAge,
+                RowVersion = game.RowVersion
             })
             .ToListAsync();
 
@@ -64,11 +64,11 @@ public class BoardGamesController : ControllerBase
                 MinPlayers = game.MinPlayers,
                 MaxPlayers = game.MaxPlayers,
                 PlayingTimeMinutes = game.PlayingTimeMinutes,
-                MinimumAge = game.MinimumAge
+                MinimumAge = game.MinimumAge,
+                RowVersion = game.RowVersion
             })
             .SingleOrDefaultAsync();
 
-        // Return 404 if the requested board game does not exist.
         if (boardGame is null)
         {
             return NotFound();
@@ -79,9 +79,9 @@ public class BoardGamesController : ControllerBase
 
     [HttpPost]
     public async Task<ActionResult<BoardGameResponse>> CreateBoardGame(
-    CreateBoardGameRequest request)
+        CreateBoardGameRequest request)
     {
-        // Create a domain entity using the validated request data.
+        // Create the board game through its domain constructor.
         var boardGame = new BoardGame(
             request.Title,
             request.Description,
@@ -94,11 +94,11 @@ public class BoardGamesController : ControllerBase
             request.PlayingTimeMinutes,
             request.MinimumAge);
 
-        // Save the new board game to the database.
         _context.BoardGames.Add(boardGame);
+
+        // SQL Server generates RowVersion when the entity is saved.
         await _context.SaveChangesAsync();
 
-        // Return the created board game using our shared response DTO.
         var response = new BoardGameResponse
         {
             Id = boardGame.Id,
@@ -111,18 +111,21 @@ public class BoardGamesController : ControllerBase
             MinPlayers = boardGame.MinPlayers,
             MaxPlayers = boardGame.MaxPlayers,
             PlayingTimeMinutes = boardGame.PlayingTimeMinutes,
-            MinimumAge = boardGame.MinimumAge
+            MinimumAge = boardGame.MinimumAge,
+            RowVersion = boardGame.RowVersion
         };
 
-        // Return 201 Created and the URL of the new resource.
         return CreatedAtAction(
             nameof(GetBoardGame),
             new { id = boardGame.Id },
             response);
     }
 
-
     [HttpPut("{id:guid}")]
+    [ProducesResponseType(typeof(BoardGameResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BoardGameResponse>> UpdateBoardGame(
         Guid id,
         UpdateBoardGameRequest request)
@@ -135,6 +138,22 @@ public class BoardGamesController : ControllerBase
         {
             return NotFound();
         }
+
+        // Require the version originally retrieved by the client.
+        if (request.RowVersion is null || request.RowVersion.Length != 8)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid RowVersion",
+                Detail = "A valid RowVersion is required when updating a board game."
+            });
+        }
+
+        // Compare the client's version with the database version on save.
+        _context.Entry(boardGame)
+            .Property(game => game.RowVersion)
+            .OriginalValue = request.RowVersion;
 
         // Update the board game through its domain validation.
         boardGame.Update(
@@ -149,9 +168,21 @@ public class BoardGamesController : ControllerBase
             request.PlayingTimeMinutes,
             request.MinimumAge);
 
-        await _context.SaveChangesAsync();
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Board game was modified",
+                Detail = "The board game has been modified or deleted by another request. Retrieve the latest version before updating."
+            });
+        }
 
-        // Return the updated board game.
+        // Return the updated board game and its new RowVersion.
         return Ok(new BoardGameResponse
         {
             Id = boardGame.Id,
@@ -164,7 +195,8 @@ public class BoardGamesController : ControllerBase
             MinPlayers = boardGame.MinPlayers,
             MaxPlayers = boardGame.MaxPlayers,
             PlayingTimeMinutes = boardGame.PlayingTimeMinutes,
-            MinimumAge = boardGame.MinimumAge
+            MinimumAge = boardGame.MinimumAge,
+            RowVersion = boardGame.RowVersion
         });
     }
 
@@ -197,7 +229,6 @@ public class BoardGamesController : ControllerBase
             });
         }
 
-        // Delete the board game when no physical copies exist.
         _context.BoardGames.Remove(boardGame);
         await _context.SaveChangesAsync();
 

@@ -4,6 +4,7 @@
     <File Path="docs/adr/001-database-generated-integer-ids.md" />
     <File Path="docs/adr/002-separate-domain-and-persistence-configuration.md" />
     <File Path="docs/adr/003-application-generated-uuidv7-ids.md" />
+    <File Path="docs/adr/004-concurrency-streategy.md" />
   </Folder>
   <Project Path="API.Tests/API.Tests.csproj" />
   <Project Path="API/API.csproj" />

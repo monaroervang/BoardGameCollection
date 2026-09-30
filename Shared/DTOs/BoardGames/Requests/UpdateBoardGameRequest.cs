@@ -13,4 +13,5 @@ public sealed record UpdateBoardGameRequest
     public int MaxPlayers { get; init; }
     public int PlayingTimeMinutes { get; init; }
     public int MinimumAge { get; init; }
+    public byte[] RowVersion { get; init; } = [];
 }

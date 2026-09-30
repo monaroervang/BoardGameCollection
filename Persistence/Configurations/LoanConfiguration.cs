@@ -33,5 +33,9 @@ public class LoanConfiguration : IEntityTypeConfiguration<Loan>
         // Calculated domain properties are not persisted
         builder.Ignore(l => l.IsReturned);
         builder.Ignore(l => l.IsOverdue);
+
+        builder.HasIndex(loan => loan.ItemId) // Index for efficient lookups by ItemId
+        .IsUnique() // Ensure that an item can only be loaned out once at a time
+        .HasFilter("[ReturnDate] IS NULL"); // Only enforce uniqueness for active loans (where ReturnDate is null)
     }
 }

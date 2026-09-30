@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿
+using System.Net;
 using System.Net.Http.Json;
 using Shared.DTOs.BoardGames.Requests;
 using Shared.DTOs.BoardGames.Responses;
@@ -13,7 +14,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     public BoardGamesApiTests(BoardGameApiFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient(); // Create an HttpClient to send requests to the test server.
+        _client = factory.CreateClient();
     }
 
     [Fact]
@@ -35,19 +36,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
         // Arrange
         await _factory.InitializeDatabaseAsync();
 
-        var request = new CreateBoardGameRequest
-        {
-            Title = "API Test Game",
-            Description = "Created by an API integration test.",
-            Genre = "Strategy",
-            Publisher = "Test Publisher",
-            Edition = "First Edition",
-            ReleaseYear = 2025,
-            MinPlayers = 2,
-            MaxPlayers = 4,
-            PlayingTimeMinutes = 60,
-            MinimumAge = 12
-        };
+        var request = CreateValidBoardGameRequest();
 
         // Act
         var response = await _client.PostAsJsonAsync(
@@ -57,26 +46,30 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
-        var boardGame =
-            await response.Content.ReadFromJsonAsync<BoardGameResponse>();
+        var boardGame = await response.Content
+            .ReadFromJsonAsync<BoardGameResponse>();
 
         Assert.NotNull(boardGame);
-        Assert.NotEqual(Guid.Empty, boardGame.Id); // Ensure the ID is not empty.
+        Assert.NotEqual(Guid.Empty, boardGame.Id);
         Assert.Equal(request.Title, boardGame.Title);
 
-        // Act
+        // Verify that SQL Server generated a RowVersion.
+        Assert.NotNull(boardGame.RowVersion);
+        Assert.Equal(8, boardGame.RowVersion.Length);
+
+        // Verify that the board game was persisted.
         var getResponse = await _client.GetAsync(
             $"/api/boardgames/{boardGame.Id}");
 
-        // Assert
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
 
-        var savedBoardGame =
-            await getResponse.Content.ReadFromJsonAsync<BoardGameResponse>();
+        var savedBoardGame = await getResponse.Content
+            .ReadFromJsonAsync<BoardGameResponse>();
 
         Assert.NotNull(savedBoardGame);
         Assert.Equal(boardGame.Id, savedBoardGame.Id);
         Assert.Equal(request.Title, savedBoardGame.Title);
+        Assert.Equal(boardGame.RowVersion, savedBoardGame.RowVersion);
     }
 
     [Fact]
@@ -85,18 +78,9 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
         // Arrange
         await _factory.InitializeDatabaseAsync();
 
-        var request = new CreateBoardGameRequest
+        var request = CreateValidBoardGameRequest() with
         {
-            Title = "Invalid Game",
-            Description = "This game has an invalid player count.",
-            Genre = "Strategy",
-            Publisher = "Test Publisher",
-            Edition = null,
-            ReleaseYear = 2025,
-            MinPlayers = 0, // Invalid minimum players
-            MaxPlayers = 4,
-            PlayingTimeMinutes = 60,
-            MinimumAge = 12
+            MinPlayers = 0
         };
 
         // Act
@@ -114,59 +98,49 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
         // Arrange
         await _factory.InitializeDatabaseAsync();
 
-        var createRequest = new CreateBoardGameRequest
-        {
-            Title = "Game Before Update",
-            Description = "Original description.",
-            Genre = "Strategy",
-            Publisher = "Test Publisher",
-            Edition = null,
-            ReleaseYear = 2024,
-            MinPlayers = 2,
-            MaxPlayers = 4,
-            PlayingTimeMinutes = 60,
-            MinimumAge = 12
-        };
+        var createdBoardGame = await CreateBoardGameAsync();
 
-        var createResponse = await _client.PostAsJsonAsync(
-            "/api/boardgames",
-            createRequest);
-
-        var createdBoardGame =
-            await createResponse.Content.ReadFromJsonAsync<BoardGameResponse>();
-
-        Assert.NotNull(createdBoardGame);
-
-        var updateRequest = new UpdateBoardGameRequest
-        {
-            Title = "Game After Update",
-            Description = "Updated description.",
-            Genre = "Adventure",
-            Publisher = "Updated Publisher",
-            Edition = "Second Edition",
-            ReleaseYear = 2025,
-            MinPlayers = 1,
-            MaxPlayers = 5,
-            PlayingTimeMinutes = 90,
-            MinimumAge = 10
-        };
+        var updateRequest = CreateUpdateRequest(
+            createdBoardGame,
+            "Game After Update");
 
         // Act
-        var updateResponse = await _client.PutAsJsonAsync( //PutAsJsonAsync sends a PUT request with JSON content to the specified URI.
+        var updateResponse = await _client.PutAsJsonAsync(
             $"/api/boardgames/{createdBoardGame.Id}",
             updateRequest);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
 
-        var updatedBoardGame =
-            await updateResponse.Content.ReadFromJsonAsync<BoardGameResponse>();
+        var updatedBoardGame = await updateResponse.Content
+            .ReadFromJsonAsync<BoardGameResponse>();
 
         Assert.NotNull(updatedBoardGame);
         Assert.Equal(createdBoardGame.Id, updatedBoardGame.Id);
         Assert.Equal(updateRequest.Title, updatedBoardGame.Title);
         Assert.Equal(updateRequest.Description, updatedBoardGame.Description);
         Assert.Equal(updateRequest.Genre, updatedBoardGame.Genre);
+
+        // An update must generate a new RowVersion.
+        Assert.Equal(8, updatedBoardGame.RowVersion.Length);
+        Assert.False(
+            createdBoardGame.RowVersion.SequenceEqual(
+                updatedBoardGame.RowVersion));
+
+        // Verify that the updated data was persisted.
+        var getResponse = await _client.GetAsync(
+            $"/api/boardgames/{createdBoardGame.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+
+        var savedBoardGame = await getResponse.Content
+            .ReadFromJsonAsync<BoardGameResponse>();
+
+        Assert.NotNull(savedBoardGame);
+        Assert.Equal(updateRequest.Title, savedBoardGame.Title);
+        Assert.Equal(
+            updatedBoardGame.RowVersion,
+            savedBoardGame.RowVersion);
     }
 
     [Fact]
@@ -175,39 +149,178 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
         // Arrange
         await _factory.InitializeDatabaseAsync();
 
-        var request = new CreateBoardGameRequest
-        {
-            Title = "Game To Delete",
-            Description = "This game will be deleted.",
-            Genre = "Strategy",
-            Publisher = "Test Publisher",
-            Edition = null,
-            ReleaseYear = 2025,
-            MinPlayers = 2,
-            MaxPlayers = 4,
-            PlayingTimeMinutes = 60,
-            MinimumAge = 12
-        };
-
-        var createResponse = await _client.PostAsJsonAsync(
-            "/api/boardgames",
-            request);
-
-        var createdBoardGame =
-            await createResponse.Content.ReadFromJsonAsync<BoardGameResponse>();
-
-        Assert.NotNull(createdBoardGame);
+        var createdBoardGame = await CreateBoardGameAsync();
 
         // Act
         var deleteResponse = await _client.DeleteAsync(
             $"/api/boardgames/{createdBoardGame.Id}");
 
         // Assert
-        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode); //NoContent indicates that the request was successful, but there is no content to return.
+        Assert.Equal(
+            HttpStatusCode.NoContent,
+            deleteResponse.StatusCode);
 
         var getResponse = await _client.GetAsync(
             $"/api/boardgames/{createdBoardGame.Id}");
 
-        Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode); //NotFound indicates that the requested resource could not be found.
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            getResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateBoardGame_WithStaleRowVersion_ShouldReturnConflict()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        var originalBoardGame = await CreateBoardGameAsync();
+
+        // Both users initially have the same version.
+        var firstUpdate = CreateUpdateRequest(
+            originalBoardGame,
+            "First User Update");
+
+        var secondUpdate = CreateUpdateRequest(
+            originalBoardGame,
+            "Second User Update");
+
+        // The first user saves successfully.
+        var firstResponse = await _client.PutAsJsonAsync(
+            $"/api/boardgames/{originalBoardGame.Id}",
+            firstUpdate);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            firstResponse.StatusCode);
+
+        // Act: The second user submits the outdated version.
+        var secondResponse = await _client.PutAsJsonAsync(
+            $"/api/boardgames/{originalBoardGame.Id}",
+            secondUpdate);
+
+        // Assert
+        Assert.Equal(
+            HttpStatusCode.Conflict,
+            secondResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateBoardGame_WithStaleRowVersion_ShouldPreserveFirstUpdate()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        var originalBoardGame = await CreateBoardGameAsync();
+
+        var firstUpdate = CreateUpdateRequest(
+            originalBoardGame,
+            "First User Update");
+
+        var secondUpdate = CreateUpdateRequest(
+            originalBoardGame,
+            "Second User Update");
+
+        // The first user saves successfully.
+        var firstResponse = await _client.PutAsJsonAsync(
+            $"/api/boardgames/{originalBoardGame.Id}",
+            firstUpdate);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            firstResponse.StatusCode);
+
+        var firstResult = await firstResponse.Content
+            .ReadFromJsonAsync<BoardGameResponse>();
+
+        Assert.NotNull(firstResult);
+
+        // Act: The second user attempts to overwrite the first update.
+        var secondResponse = await _client.PutAsJsonAsync(
+            $"/api/boardgames/{originalBoardGame.Id}",
+            secondUpdate);
+
+        Assert.Equal(
+            HttpStatusCode.Conflict,
+            secondResponse.StatusCode);
+
+        // Retrieve the actual database state.
+        var getResponse = await _client.GetAsync(
+            $"/api/boardgames/{originalBoardGame.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+
+        var savedBoardGame = await getResponse.Content
+            .ReadFromJsonAsync<BoardGameResponse>();
+
+        // Assert: The first user's changes must remain intact.
+        Assert.NotNull(savedBoardGame);
+        Assert.Equal("First User Update", savedBoardGame.Title);
+        Assert.NotEqual("Second User Update", savedBoardGame.Title);
+
+        Assert.Equal(
+            firstResult.RowVersion,
+            savedBoardGame.RowVersion);
+    }
+
+    // Creates a valid board game with a unique title.
+    private static CreateBoardGameRequest CreateValidBoardGameRequest()
+    {
+        return new CreateBoardGameRequest
+        {
+            Title = $"API Test Game {Guid.NewGuid():N}",
+            Description = "Created by an API integration test.",
+            Genre = "Strategy",
+            Publisher = "Test Publisher",
+            Edition = "First Edition",
+            ReleaseYear = 2025,
+            MinPlayers = 2,
+            MaxPlayers = 4,
+            PlayingTimeMinutes = 60,
+            MinimumAge = 12
+        };
+    }
+
+    // Creates and returns a board game through the API.
+    private async Task<BoardGameResponse> CreateBoardGameAsync()
+    {
+        var request = CreateValidBoardGameRequest();
+
+        var response = await _client.PostAsJsonAsync(
+            "/api/boardgames",
+            request);
+
+        Assert.Equal(
+            HttpStatusCode.Created,
+            response.StatusCode);
+
+        var boardGame = await response.Content
+            .ReadFromJsonAsync<BoardGameResponse>();
+
+        Assert.NotNull(boardGame);
+        Assert.Equal(8, boardGame.RowVersion.Length);
+
+        return boardGame;
+    }
+
+    // Creates an update request using the version originally retrieved.
+    private static UpdateBoardGameRequest CreateUpdateRequest(
+        BoardGameResponse boardGame,
+        string title)
+    {
+        return new UpdateBoardGameRequest
+        {
+            Title = title,
+            Description = "Updated description.",
+            Genre = "Adventure",
+            Publisher = "Updated Publisher",
+            Edition = "Second Edition",
+            ReleaseYear = 2025,
+            MinPlayers = 1,
+            MaxPlayers = 5,
+            PlayingTimeMinutes = 90,
+            MinimumAge = 10,
+            RowVersion = boardGame.RowVersion
+        };
     }
 }
