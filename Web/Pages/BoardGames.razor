@@ -1,0 +1,303 @@
+﻿@page "/boardgames"
+
+@using System.Net.Http.Json
+@using Shared.DTOs.BoardGames.Responses
+@using Shared.DTOs.Common
+@inject HttpClient Http
+@* Inject the HttpClient service to make HTTP requests. *@
+
+<PageTitle>Board Games</PageTitle>
+
+<h1>Board Games</h1>
+
+@* Search and filter controls for the board game catalogue. *@
+<div class="row g-3 mb-4">
+
+    <div class="col-md-4">
+        <label for="search" class="form-label">
+            Search by title
+        </label>
+
+        <input id="search"
+               class="form-control"
+               @bind="searchTerm"
+               placeholder="Enter a board game title..." />
+    </div>
+
+    <div class="col-md-3">
+        <label for="genre" class="form-label">
+            Genre
+        </label>
+
+        @* Build the genre dropdown from the genres returned by the API. *@
+        <select id="genre"
+                class="form-select"
+                @bind="genre">
+            <option value="">All genres</option>
+
+            @foreach (var availableGenre in genres)
+            {
+                <option value="@availableGenre">
+                    @availableGenre
+                </option>
+            }
+        </select>
+    </div>
+
+    <div class="col-md-2">
+        <label for="players" class="form-label">
+            Players
+        </label>
+
+        <input id="players"
+               type="number"
+               min="1"
+               class="form-control"
+               @bind="players"
+               placeholder="e.g. 4" />
+    </div>
+
+    <div class="col-md-2">
+        <label for="age" class="form-label">
+            Player age
+        </label>
+
+        <input id="age"
+               type="number"
+               min="0"
+               class="form-control"
+               @bind="age"
+               placeholder="e.g. 12" />
+    </div>
+
+    <div class="col-12">
+        <button class="btn btn-primary me-2"
+                @onclick="ApplyFiltersAsync">
+            Search
+        </button>
+
+        <button class="btn btn-secondary"
+                @onclick="ClearFiltersAsync">
+            Clear filters
+        </button>
+    </div>
+
+</div>
+
+@if (isLoading) @* Display a loading message while the data is being fetched. *@
+{
+    <p>Loading board games...</p>
+}
+else if (!string.IsNullOrWhiteSpace(errorMessage)) @* Display an error message if there was an issue fetching the data. *@
+{
+    <div class="alert alert-danger" role="alert">
+        @errorMessage
+    </div>
+}
+else if (result is null || result.Items.Count == 0) @* Display a message if no board games were found. *@
+{
+    <p>No board games were found.</p>
+}
+else
+{
+    <p>
+        Showing @result.Items.Count of @result.TotalCount board games.
+        @* Display the number of board games being shown and the total count. *@
+    </p>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Genre</th>
+                <th>Publisher</th>
+                <th>Players</th>
+                <th>Age</th>
+                <th>Playing time</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            @foreach (var game in result.Items)
+            {
+                <tr>
+                    <td>
+                        @* Navigate to the details page for the selected board game. *@
+                        <a href="@($"/boardgames/{game.Id}")">
+                            @game.Title
+                        </a>
+                    </td>
+                    <td>@game.Genre</td>
+                    <td>@game.Publisher</td>
+                    <td>@game.MinPlayers-@game.MaxPlayers</td>
+                    <td>@game.MinimumAge+</td>
+                    <td>@game.PlayingTimeMinutes min.</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    @* Navigation between the pages returned by the API. *@
+    <div class="d-flex align-items-center gap-3">
+
+        <button class="btn btn-outline-primary"
+                @onclick="PreviousPageAsync"
+                disabled="@(result.Page <= 1)">
+            Previous
+        </button>
+
+        <span>
+            Page @result.Page of @result.TotalPages
+        </span>
+
+        <button class="btn btn-outline-primary"
+                @onclick="NextPageAsync"
+                disabled="@(result.Page >= result.TotalPages)">
+            Next
+        </button>
+
+    </div>
+}
+
+@code {
+    // Contains the genres retrieved from the API.
+    private List<string> genres = [];
+    private PagedResponse<BoardGameResponse>? result;
+
+    // Variables used for searching and filtering the catalogue.
+    private string searchTerm = "";
+    private string genre = "";
+    private int? players;
+    private int? age;
+
+    // Variables used to control loading and error messages.
+    private bool isLoading = true;
+    private string? errorMessage;
+
+    // Keep track of the current page.
+    private int currentPage = 1;
+
+    // The number of board games displayed on each page.
+    private const int PageSize = 10;
+
+    // Fetch the board games when the component is initialized.
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadBoardGamesAsync();
+        await LoadGenresAsync();
+    }
+
+    // Fetch a page of board games from the API.
+    private async Task LoadBoardGamesAsync()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        try
+        {
+            // Build the API request with pagination.
+            var url =
+                $"api/boardgames?page={currentPage}&pageSize={PageSize}";
+
+            // Add the title search when one has been entered.
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                url +=
+                    $"&search={Uri.EscapeDataString(searchTerm.Trim())}";
+            }
+
+            // Add the genre filter when one has been entered.
+            if (!string.IsNullOrWhiteSpace(genre))
+            {
+                url +=
+                    $"&genre={Uri.EscapeDataString(genre.Trim())}";
+            }
+
+            // Add the player count filter when one has been selected.
+            if (players.HasValue)
+            {
+                url += $"&players={players.Value}";
+            }
+
+            // Add the age filter when one has been selected.
+            if (age.HasValue)
+            {
+                url += $"&age={age.Value}";
+            }
+
+            // Parse the JSON response from the API into a
+            // PagedResponse<BoardGameResponse> object.
+            result = await Http.GetFromJsonAsync<
+                PagedResponse<BoardGameResponse>>(url);
+        }
+        catch (HttpRequestException)
+        {
+            errorMessage =
+                "The board games could not be loaded from the API.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    // Apply the selected search and filters from the first page.
+    private async Task ApplyFiltersAsync()
+    {
+        currentPage = 1;
+
+        await LoadBoardGamesAsync();
+    }
+
+    // Clear all search and filter values and return to the first page.
+    private async Task ClearFiltersAsync()
+    {
+        searchTerm = "";
+        genre = "";
+        players = null;
+        age = null;
+        currentPage = 1;
+
+        await LoadBoardGamesAsync();
+    }
+
+    // Load the previous page when one is available.
+    private async Task PreviousPageAsync()
+    {
+        if (currentPage <= 1)
+        {
+            return;
+        }
+
+        currentPage--;
+
+        await LoadBoardGamesAsync();
+    }
+
+    // Load the next page when one is available.
+    private async Task NextPageAsync()
+    {
+        if (result is null ||
+            currentPage >= result.TotalPages)
+        {
+            return;
+        }
+
+        currentPage++;
+
+        await LoadBoardGamesAsync();
+    }
+    // Fetch the available genres from the API.
+    private async Task LoadGenresAsync()
+    {
+        try
+        {
+            genres = await Http.GetFromJsonAsync<List<string>>(
+                "api/boardgames/genres") ?? [];
+        }
+		catch (HttpRequestException) // Handle any errors that occur during the API request.
+        {
+			genres = []; // If the request fails, set genres to an empty list.
+        }
+    }
+}

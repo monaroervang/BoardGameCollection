@@ -1,0 +1,129 @@
+﻿@page "/users/{UserId:guid}/collection"
+
+@using System.Net.Http.Json
+@using Shared.DTOs.Items.Responses
+@inject HttpClient Http
+
+<PageTitle>Collection</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Board Game Collection</h1>
+
+    @* Navigate back to the list of users. *@
+    <a class="btn btn-outline-secondary"
+       href="/users">
+        Back to users
+    </a>
+</div>
+
+@if (isLoading) @* Display a loading message while the collection is being fetched. *@
+{
+    <p>Loading collection...</p>
+}
+else if (!string.IsNullOrWhiteSpace(errorMessage)) @* Display an error message if the collection could not be loaded. *@
+{
+    <div class="alert alert-danger" role="alert">
+        @errorMessage
+    </div>
+}
+else if (collection.Count == 0) @* Display a message when the user does not own any board games. *@
+{
+    <div class="alert alert-info">
+        This user does not have any board games in their collection.
+    </div>
+}
+else
+{
+    <p class="text-muted">
+        This collection contains @collection.Count physical board game copies.
+    </p>
+
+    <div class="row g-3">
+        @foreach (var item in collection)
+        {
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm">
+
+                    <div class="card-body d-flex flex-column">
+
+                        <h5 class="card-title">
+                            @item.Title
+                        </h5>
+
+                        <h6 class="card-subtitle mb-3 text-muted">
+                            @item.Genre
+                        </h6>
+
+                        <p class="card-text">
+                            <strong>Publisher:</strong>
+                            @item.Publisher
+                            <br />
+
+                            <strong>Players:</strong>
+                            @item.MinPlayers-@item.MaxPlayers
+                            <br />
+
+                            <strong>Minimum age:</strong>
+                            @item.MinimumAge+
+                            <br />
+
+                            <strong>Playing time:</strong>
+                            @item.PlayingTimeMinutes min.
+                        </p>
+
+                        @* Link to the specific physical copy. *@
+                        <div class="mt-auto">
+                            <a class="btn btn-outline-primary"
+                               href="@($"/items/{item.ItemId}")">
+                                View item
+                            </a>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    // The user ID is read from the route.
+    [Parameter]
+    public Guid UserId { get; set; }
+
+    // Contains the physical board game copies owned by the user.
+    private List<CollectionItemResponse> collection = [];
+
+    // Variables used to control loading and error messages.
+    private bool isLoading = true;
+    private string? errorMessage;
+
+    // Fetch the user's collection when the component is initialized.
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCollectionAsync();
+    }
+
+    // Fetch all physical board game copies owned by the user.
+    private async Task LoadCollectionAsync()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        try
+        {
+            collection =
+                await Http.GetFromJsonAsync<List<CollectionItemResponse>>(
+                    $"api/items/owner/{UserId}") ?? [];
+        }
+        catch (HttpRequestException)
+        {
+            errorMessage =
+                "The user's collection could not be loaded from the API.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

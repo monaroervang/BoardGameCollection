@@ -1,0 +1,96 @@
+﻿@page "/users"
+
+@using System.Net.Http.Json
+@using Shared.DTOs.Users.Responses
+@inject HttpClient Http 
+
+<PageTitle>Users</PageTitle>
+
+<h1>Users</h1>
+
+@if (isLoading) @* Display a loading message while the data is being fetched. *@
+{
+    <p>Loading users...</p>
+}
+else if (!string.IsNullOrWhiteSpace(errorMessage)) @* Display an error message if the users could not be loaded. *@
+{
+    <div class="alert alert-danger" role="alert">
+        @errorMessage
+    </div>
+}
+else if (users.Count == 0) @* Display a message when no users were found. *@
+{
+    <p>No users were found.</p>
+}
+else
+{
+    <p>
+        Showing @users.Count users.
+    </p>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Date of birth</th>
+                <th>City</th>
+                <th>Country</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            @foreach (var user in users)
+            {
+                <tr>
+                    <td>@user.Username</td>
+                    <td>
+                        @user.Name.FirstName @user.Name.LastName
+                    </td>
+                    <td>@user.Email.Value</td>
+                    <td>@user.DateOfBirth</td>
+                    <td>@user.Address.City</td>
+                    <td>@user.Address.Country</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    // Contains the users retrieved from the API.
+    private List<UserResponse> users = [];
+
+    // Variables used to control loading and error messages.
+    private bool isLoading = true;
+    private string? errorMessage;
+
+    // Fetch the users when the component is initialized.
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsersAsync();
+    }
+
+    // Fetch all users from the API.
+    private async Task LoadUsersAsync()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        try
+        {
+            users = await Http.GetFromJsonAsync<List<UserResponse>>(
+                "api/users") ?? [];
+        }
+        catch (HttpRequestException)
+        {
+            errorMessage =
+                "The users could not be loaded from the API.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

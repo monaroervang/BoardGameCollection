@@ -1,0 +1,214 @@
+﻿@page "/boardgames/{BoardGameId:guid}"
+
+@using System.Net
+@using System.Net.Http.Json
+@using Shared.DTOs.BoardGames.Responses
+@using Shared.DTOs.Items.Responses
+@inject HttpClient Http
+
+<PageTitle>Board Game Details</PageTitle>
+
+@if (isLoading) @* Display a loading message while the board game is being fetched. *@
+{
+	<p>Loading board game...</p>
+}
+else if (!string.IsNullOrWhiteSpace(errorMessage))
+@* Display an error message if the board game could not be loaded. *@
+{
+	<div class="alert alert-danger" role="alert">
+		@errorMessage
+	</div>
+
+	<a class="btn btn-outline-secondary"
+	   href="/boardgames">
+		Back to board games
+	</a>
+}
+else if (boardGame is not null)
+{
+	<div class="mb-4">
+		<a class="btn btn-outline-secondary"
+		   href="/boardgames">
+			Back to board games
+		</a>
+	</div>
+
+	<h1>@boardGame.Title</h1>
+
+	<p class="text-muted">
+		@boardGame.Genre
+	</p>
+
+	<div class="card mb-4">
+		<div class="card-body">
+
+			<p>
+				<strong>Publisher:</strong>
+				@boardGame.Publisher
+			</p>
+
+			@if (!string.IsNullOrWhiteSpace(boardGame.Edition))
+			{
+				<p>
+					<strong>Edition:</strong>
+					@boardGame.Edition
+				</p>
+			}
+
+			<p>
+				<strong>Release year:</strong>
+				@boardGame.ReleaseYear
+			</p>
+
+			<p>
+				<strong>Players:</strong>
+				@boardGame.MinPlayers-@boardGame.MaxPlayers
+			</p>
+
+			<p>
+				<strong>Minimum age:</strong>
+				@boardGame.MinimumAge+
+			</p>
+
+			<p>
+				<strong>Playing time:</strong>
+				@boardGame.PlayingTimeMinutes min.
+			</p>
+
+			<p>
+				<strong>Description:</strong>
+				<br />
+				@boardGame.Description
+			</p>
+
+		</div>
+	</div>
+
+	@* Display all physical copies of this board game. *@
+	<h2>Physical copies</h2>
+
+	@if (items.Count == 0)
+	{
+		<p class="text-muted">
+			No physical copies of this board game are currently registered.
+		</p>
+	}
+	else
+	{
+		<div class="table-responsive">
+			<table class="table table-striped align-middle">
+				<thead>
+					<tr>
+						<th>Owner</th>
+						<th>Status</th>
+					</tr>
+				</thead>
+
+				<tbody>
+					@foreach (var item in items)
+					{
+						<tr>
+							<td>
+								@item.OwnerUsername
+							</td>
+
+							<td>
+								@if (item.IsAvailable)
+								{
+									<span class="badge bg-success">
+										Available
+									</span>
+								}
+								else
+								{
+									<span class="badge bg-secondary">
+										On loan
+									</span>
+								}
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+@code {
+	// The board game ID is read from the route.
+	[Parameter]
+	public Guid BoardGameId { get; set; }
+
+	// Contains the board game retrieved from the API.
+	private BoardGameResponse? boardGame;
+
+	// Contains the physical copies of the selected board game.
+	private List<BoardGameItemResponse> items = [];
+	
+
+	// Variables used to control loading and error messages.
+	private bool isLoading = true;
+	private string? errorMessage;
+
+	// Fetch the board game and its physical copies when the component is initialized.
+	protected override async Task OnInitializedAsync()
+	{
+		await LoadBoardGameAsync();
+
+		// Only fetch physical copies if the board game was found.
+		if (boardGame is not null)
+		{
+			await LoadItemsAsync();
+		}
+	}
+
+	// Fetch the selected board game from the API.
+	private async Task LoadBoardGameAsync()
+	{
+		isLoading = true;
+		errorMessage = null;
+
+		try
+		{
+			var response = await Http.GetAsync(
+				$"api/boardgames/{BoardGameId}");
+
+			if (response.StatusCode == HttpStatusCode.NotFound)
+			{
+				errorMessage = "The board game was not found.";
+				return;
+			}
+
+			response.EnsureSuccessStatusCode();
+
+			boardGame =
+				await response.Content
+					.ReadFromJsonAsync<BoardGameResponse>();
+		}
+		catch (HttpRequestException)
+		{
+			errorMessage =
+				"The board game could not be loaded from the API.";
+		}
+		finally
+		{
+			isLoading = false;
+		}
+		}
+		// Fetch all physical copies of the selected board game.
+		private async Task LoadItemsAsync()
+		{
+		try
+		{
+			items =
+				await Http.GetFromJsonAsync<List<BoardGameItemResponse>>(
+					$"api/items/boardgame/{BoardGameId}") ?? [];
+		}
+		catch (HttpRequestException)
+		{
+			errorMessage =
+				"The physical copies could not be loaded from the API.";
+		}
+	}
+}
+	

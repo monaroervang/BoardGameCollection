@@ -30,6 +30,18 @@ builder.Services.AddScoped<BoardGameDbSeeder>();
 
 builder.Services.AddControllers(); // Add services for controllers to the container.
 
+// Allow the Blazor WebAssembly client to call the API.
+builder.Services.AddCors(options => //CORS is a security feature that restricts cross-origin HTTP requests initiated from scripts running in the browser.
+{
+    options.AddPolicy("WebClient", policy =>
+    {
+        policy
+            .AllowAnyOrigin() //For now, allow any origin. In production, you should restrict this to the specific origins that need access.
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
 // Register centralized exception handling for domain validation.
 builder.Services.AddExceptionHandler<DomainExceptionHandler>();
 builder.Services.AddProblemDetails();
@@ -69,9 +81,12 @@ if (app.Environment.IsDevelopment())
     );
 }
 
-app.UseHttpsRedirection();
+app.UseHttpsRedirection(); // Redirect HTTP requests to HTTPS for security.
 
-app.MapControllers(); // Map controller routes to the request pipeline.
+// Apply the CORS policy before controller endpoints are executed.
+app.UseCors("WebClient");
+
+app.MapControllers(); // Map controller endpoints to the request pipeline.
 
 app.Run();
 

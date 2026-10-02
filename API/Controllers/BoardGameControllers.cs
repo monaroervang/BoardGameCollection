@@ -391,4 +391,21 @@ public class BoardGamesController : ControllerBase
         return NoContent();
     }
 
+    // Get all distinct genres used by board games.
+    [HttpGet("genres")]
+    [ProducesResponseType(
+        typeof(List<string>),
+        StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<string>>> GetGenres()
+    {
+        var genres = await _context.BoardGames
+            .AsNoTracking()
+            .Select(boardGame => boardGame.Genre)
+            .Distinct()
+            .OrderBy(genre => genre)
+            .ToListAsync();
+
+        return Ok(genres);
+    }
+
 }
