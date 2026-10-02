@@ -5,6 +5,7 @@ using Persistence.Repositories;
 using Shared.DTOs.BoardGames.Responses;
 using Domain.Models;
 using Shared.DTOs.BoardGames.Requests;
+using Shared.DTOs.Common;
 
 namespace API.Controllers;
 
@@ -19,12 +20,101 @@ public class BoardGamesController : ControllerBase
         _context = context;
     }
 
+
+
+
     [HttpGet]
-    public async Task<ActionResult<List<BoardGameResponse>>> GetBoardGames()
+    [ProducesResponseType(
+        typeof(PagedResponse<BoardGameResponse>),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<PagedResponse<BoardGameResponse>>> GetBoardGames(
+        [FromQuery] string? search,
+        [FromQuery] string? genre,
+        [FromQuery] int? players,
+        [FromQuery] int? age,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10)
     {
-        // Return board games as DTOs without EF Core change tracking.
-        var boardGames = await _context.BoardGames
+        // Validate pagination parameters.
+        if (page < 1 || pageSize < 1 || pageSize > 100)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid pagination parameters",
+                Detail = "Page must be at least 1, and pageSize must be between 1 and 100."
+            });
+        }
+
+        // Validate optional numeric filters.
+        if (players.HasValue && players.Value < 1)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid player count",
+                Detail = "Players must be greater than zero."
+            });
+        }
+
+        if (age.HasValue && age.Value < 0)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid age",
+                Detail = "Age cannot be negative."
+            });
+        }
+
+        // Build the query without EF Core change tracking.
+        var query = _context.BoardGames
             .AsNoTracking()
+            .AsQueryable();
+
+        // Search by partial title.
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var searchTerm = search.Trim();
+
+            query = query.Where(game =>
+                game.Title.Contains(searchTerm));
+        }
+
+        // Filter by genre.
+        if (!string.IsNullOrWhiteSpace(genre))
+        {
+            var selectedGenre = genre.Trim();
+
+            query = query.Where(game =>
+                game.Genre == selectedGenre);
+        }
+
+        // Filter by supported player count.
+        if (players.HasValue)
+        {
+            query = query.Where(game =>
+                game.MinPlayers <= players.Value &&
+                game.MaxPlayers >= players.Value);
+        }
+
+        // Filter by minimum age.
+        if (age.HasValue)
+        {
+            query = query.Where(game =>
+                game.MinimumAge <= age.Value);
+        }
+
+        // Count all matching games before pagination.
+        var totalCount = await query.CountAsync();
+
+        // Fetch only the requested page.
+        var boardGames = await query
+            .OrderBy(game => game.Title)
+            .ThenBy(game => game.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(game => new BoardGameResponse
             {
                 Id = game.Id,
@@ -42,8 +132,18 @@ public class BoardGamesController : ControllerBase
             })
             .ToListAsync();
 
-        return Ok(boardGames);
+        // Return the games together with pagination metadata.
+        return Ok(new PagedResponse<BoardGameResponse>
+        {
+            Items = boardGames,
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount
+        });
     }
+
+
+
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<BoardGameResponse>> GetBoardGame(Guid id)
