@@ -1,0 +1,111 @@
+﻿@page "/login"
+
+@using System.Net
+@using System.Net.Http.Json
+@using Shared.DTOs.Authentication.Requests
+@using Shared.DTOs.Authentication.Responses
+@using Web.Authentication
+
+@inject HttpClient Http
+@inject JwtAuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager Navigation
+
+<PageTitle>Login</PageTitle>
+
+<h1>Login</h1>
+
+<div class="row">
+    <div class="col-md-5">
+        <EditForm Model="_loginRequest" OnValidSubmit="LoginAsync">
+            <div class="mb-3">
+                <label for="username" class="form-label">
+                    Username
+                </label>
+
+                <InputText id="username"
+                           class="form-control"
+                           @bind-Value="_loginRequest.Username" />
+            </div>
+
+            <div class="mb-3">
+                <label for="password" class="form-label">
+                    Password
+                </label>
+
+                <InputText id="password"
+                           type="password"
+                           class="form-control"
+                           @bind-Value="_loginRequest.Password" />
+            </div>
+
+            <button type="submit"
+                    class="btn btn-primary"
+                    disabled="@_isLoggingIn">
+                @(_isLoggingIn ? "Logging in..." : "Login")
+            </button>
+        </EditForm>
+
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="alert alert-danger mt-3">
+                @_errorMessage
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private LoginRequest _loginRequest = new();
+    private string? _errorMessage;
+    private bool _isLoggingIn;
+
+    // Authenticate the user and store the returned JWT.
+    private async Task LoginAsync()
+    {
+        _errorMessage = null;
+        _isLoggingIn = true;
+
+        try
+        {
+            var response = await Http.PostAsJsonAsync(
+                "api/auth/login",
+                _loginRequest);
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                _errorMessage = "Invalid username or password.";
+                return;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _errorMessage = "Login failed. Please try again.";
+                return;
+            }
+
+            var result = await response.Content
+                .ReadFromJsonAsync<LoginResponse>();
+
+            if (result is null ||
+                string.IsNullOrWhiteSpace(result.Token))
+            {
+                _errorMessage = "Login failed. Please try again.";
+                return;
+            }
+
+            await AuthenticationStateProvider.LoginAsync(
+                result.Token);
+
+            Navigation.NavigateTo("/");
+        }
+        catch (HttpRequestException)
+        {
+            _errorMessage =
+                "Unable to connect to the server.";
+        }
+        finally
+        {
+            _isLoggingIn = false;
+        }
+    }
+}

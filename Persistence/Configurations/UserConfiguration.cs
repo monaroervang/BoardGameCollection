@@ -28,6 +28,11 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.HasIndex(u => u.Username) //Means that the Username property must be unique across all User entities in the database
             .IsUnique();
 
+        // Store the hashed password used for authentication.
+        builder.Property(u => u.PasswordHash)
+            .IsRequired()
+            .HasMaxLength(500);
+
         builder.Property(u => u.DateOfBirth)
             .IsRequired();
 

@@ -12,11 +12,11 @@ namespace API.Controllers;
 
 [ApiController]
 [Route("api/loans")]
-public class LoanControllers : ControllerBase
+public class LoanController : ControllerBase
 {
     private readonly BoardGameDbContext _context;
 
-    public LoanControllers(BoardGameDbContext context)
+    public LoanController(BoardGameDbContext context)
     {
         _context = context;
     }

@@ -12,11 +12,11 @@ namespace API.Controllers;
 
 [ApiController]
 [Route("api/users")]
-public class UserControllers : ControllerBase
+public class UserController : ControllerBase
 {
     private readonly BoardGameDbContext _context;
 
-    public UserControllers(BoardGameDbContext context)
+    public UserController(BoardGameDbContext context)
     {
         _context = context;
     }

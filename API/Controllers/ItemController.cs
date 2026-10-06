@@ -9,11 +9,11 @@ namespace API.Controllers;
 
 [ApiController]
 [Route("api/items")]
-public class ItemControllers : ControllerBase
+public class ItemController : ControllerBase
 {
     private readonly BoardGameDbContext _context;
 
-    public ItemControllers(BoardGameDbContext context)
+    public ItemController(BoardGameDbContext context)
     {
         _context = context;
     }

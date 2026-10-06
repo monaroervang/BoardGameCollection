@@ -10,6 +10,7 @@ public class User
     public Email Email { get; private set; } = null!;
     public DateOnly DateOfBirth { get; private set; }
     public Address Address { get; private set; } = null!;
+    public string PasswordHash { get; private set; } = ""; // Store the hashed password
 
     // Used by EF Core when materializing users from the database.
     private User()
@@ -56,5 +57,17 @@ public class User
         Email = email;
         DateOfBirth = dateOfBirth;
         Address = address;
+     
+    }
+
+    // Sets the hashed password used for authentication.
+    public void SetPasswordHash(string passwordHash)
+    {
+        if (string.IsNullOrWhiteSpace(passwordHash))
+        {
+            throw new RequiredFieldException(nameof(PasswordHash));
+        }
+
+        PasswordHash = passwordHash;
     }
 }

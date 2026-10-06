@@ -1,39 +1,94 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
+﻿@using Microsoft.AspNetCore.Components.Authorization
+@using Web.Authentication
+
+@inject JwtAuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager Navigation
+
+<div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
-        <a class="navbar-brand" href="">Web</a>
-        <button title="Navigation menu" class="navbar-toggler" @onclick="ToggleNavMenu">
+        <a class="navbar-brand" href="">BoardGameCollection</a>
+
+        <button title="Navigation menu"
+                class="navbar-toggler"
+                @onclick="ToggleNavMenu">
             <span class="navbar-toggler-icon"></span>
         </button>
     </div>
 </div>
 
-<div class="@NavMenuCssClass nav-scrollable" @onclick="ToggleNavMenu">
+<div class="@NavMenuCssClass nav-scrollable"
+     @onclick="ToggleNavMenu">
+
     <nav class="nav flex-column">
+
         <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
+            <NavLink class="nav-link"
+                     href=""
+                     Match="NavLinkMatch.All">
+                <span class="bi bi-house-door-fill-nav-menu"
+                      aria-hidden="true"></span>
+                Home
             </NavLink>
         </div>
+
         <div class="nav-item px-3">
-            <NavLink class="nav-link" href="counter">
-                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Counter
+            <NavLink class="nav-link"
+                     href="boardgames">
+                <span class="bi bi-list-nested-nav-menu"
+                      aria-hidden="true"></span>
+                Board Games
             </NavLink>
         </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="weather">
-                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Weather
-            </NavLink>
-        </div>
+
+        <AuthorizeView>
+            <Authorized Context="authContext">
+
+                <div class="nav-item px-3">
+                    <span class="nav-link">
+                        @authContext.User.Identity?.Name
+                    </span>
+                </div>
+
+                <div class="nav-item px-3">
+                    <button class="btn btn-link nav-link"
+                            @onclick="LogoutAsync">
+                        Logout
+                    </button>
+                </div>
+
+            </Authorized>
+
+            <NotAuthorized>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link"
+                             href="login">
+                        Login
+                    </NavLink>
+                </div>
+
+            </NotAuthorized>
+        </AuthorizeView>
+
     </nav>
 </div>
 
 @code {
     private bool collapseNavMenu = true;
 
-    private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
+    private string? NavMenuCssClass =>
+        collapseNavMenu ? "collapse" : null;
 
     private void ToggleNavMenu()
     {
         collapseNavMenu = !collapseNavMenu;
+    }
+
+    // Log out the current user and return to the home page.
+    private async Task LogoutAsync()
+    {
+        await AuthenticationStateProvider.LogoutAsync();
+
+        Navigation.NavigateTo("/");
     }
 }

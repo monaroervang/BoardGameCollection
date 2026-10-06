@@ -13,11 +13,28 @@ public class BoardGameApiFactory : WebApplicationFactory<Program>
     private const string TestConnectionString =
         @"Server=(localdb)\MSSQLLocalDB;Database=BoardGameCollectionApiTests;Trusted_Connection=True;TrustServerCertificate=True;";
 
+    private readonly SemaphoreSlim _databaseLock = new(1, 1);
+    private bool _databaseInitialized;
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-            Environment.SetEnvironmentVariable(
-        "ConnectionStrings__BoardGameDatabase",
-        TestConnectionString);
+        // Configure values required by the API test host.
+        builder.UseSetting(
+            "ConnectionStrings:BoardGameDatabase",
+            TestConnectionString);
+
+        builder.UseSetting(
+            "Jwt:Key",
+            "BoardGameCollection-IntegrationTests-JWT-Key-2026!");
+
+        builder.UseSetting(
+            "Jwt:Issuer",
+            "BoardGameCollection.API");
+
+        builder.UseSetting(
+            "Jwt:Audience",
+            "BoardGameCollection.Web");
+
         // Use Production so development seeding does not run during API tests.
         builder.UseEnvironment("Production");
 
@@ -30,19 +47,31 @@ public class BoardGameApiFactory : WebApplicationFactory<Program>
             services.AddDbContext<BoardGameDbContext>(options =>
                 options.UseSqlServer(TestConnectionString));
         });
-
-
     }
 
     public async Task InitializeDatabaseAsync()
     {
-        // Create a scope to access the test DbContext.
-        using var scope = Services.CreateScope();
+        await _databaseLock.WaitAsync();
 
-        var context = scope.ServiceProvider
-            .GetRequiredService<BoardGameDbContext>();
+        try
+        {
+            // The database only needs to be migrated once per test factory.
+            if (_databaseInitialized)
+                return;
 
-        // Apply the real EF Core migrations to the test database.
-        await context.Database.MigrateAsync();
+            using var scope = Services.CreateScope();
+
+            var context = scope.ServiceProvider
+                .GetRequiredService<BoardGameDbContext>();
+
+            // Apply the real EF Core migrations to the test database.
+            await context.Database.MigrateAsync();
+
+            _databaseInitialized = true;
+        }
+        finally
+        {
+            _databaseLock.Release();
+        }
     }
 }
