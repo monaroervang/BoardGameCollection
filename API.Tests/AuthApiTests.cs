@@ -1,12 +1,13 @@
-﻿using Domain.ValueObjects;
+﻿using Domain.Enums;
+using Domain.ValueObjects;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Persistence.Repositories;
 using Shared.DTOs.Authentication.Requests;
 using Shared.DTOs.Authentication.Responses;
 using System.Net;
-using System.Net.Http.Json;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 
 namespace API.Tests;
 
@@ -27,8 +28,8 @@ public class AuthApiTests : IClassFixture<BoardGameApiFactory>
         // Arrange
         await _factory.InitializeDatabaseAsync();
 
-        var username = $"auth-{Guid.NewGuid():N}"; // Unique username to avoid conflicts with existing users
-        const string password = "Test123!"; // Use a strong password for testing
+        var username = $"auth-{Guid.NewGuid():N}";
+        const string password = "Test123!";
 
         var user = await CreateUserAsync(
             username,
@@ -102,10 +103,144 @@ public class AuthApiTests : IClassFixture<BoardGameApiFactory>
             HttpStatusCode.Unauthorized,
             response.StatusCode);
     }
+
+    [Fact]
+    public async Task GetCurrentUser_WithoutToken_ShouldReturnUnauthorized()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        // Act
+        var response = await _client.GetAsync(
+            "/api/auth/me");
+
+        // Assert
+        Assert.Equal(
+            HttpStatusCode.Unauthorized,
+            response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetCurrentUser_WithValidToken_ShouldReturnCurrentUser()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        var username = $"auth-{Guid.NewGuid():N}";
+        const string password = "Test123!";
+
+        var user = await CreateUserAsync(
+            username,
+            password);
+
+        var token = await LoginAsync(
+            username,
+            password);
+
+        using var request = CreateAuthorizedGetRequest(
+            "/api/auth/me",
+            token);
+
+        // Act
+        var response = await _client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(
+            HttpStatusCode.OK,
+            response.StatusCode);
+
+        var result = await response.Content
+            .ReadFromJsonAsync<CurrentUserResponse>();
+
+        Assert.NotNull(result);
+        Assert.Equal(user.Id, result.UserId);
+        Assert.Equal(username, result.Username);
+        Assert.Equal("User", result.Role); // Assuming the default role is "User"
+    }
+
+    [Fact]
+    public async Task GetAdminAccess_WithoutToken_ShouldReturnUnauthorized()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        // Act
+        var response = await _client.GetAsync(
+            "/api/auth/admin");
+
+        // Assert
+        Assert.Equal(
+            HttpStatusCode.Unauthorized,
+            response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetAdminAccess_WithUserRole_ShouldReturnForbidden()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        var username = $"user-{Guid.NewGuid():N}";
+        const string password = "Test123!";
+
+        await CreateUserAsync(
+            username,
+            password,
+            UserRole.User);
+
+        var token = await LoginAsync(
+            username,
+            password);
+
+        using var request = CreateAuthorizedGetRequest(
+            "/api/auth/admin",
+            token);
+
+        // Act
+        var response = await _client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetAdminAccess_WithAdminRole_ShouldReturnOk()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        var username = $"admin-{Guid.NewGuid():N}";
+        const string password = "Test123!";
+
+        await CreateUserAsync(
+            username,
+            password,
+            UserRole.Admin);
+
+        var token = await LoginAsync(
+            username,
+            password);
+
+        using var request = CreateAuthorizedGetRequest(
+            "/api/auth/admin",
+            token);
+
+        // Act
+        var response = await _client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(
+            HttpStatusCode.OK,
+            response.StatusCode);
+    }
+
     // Create a user with a real password hash for authentication tests.
     private async Task<User> CreateUserAsync(
         string username,
-        string password)
+        string password,
+        UserRole role = UserRole.User)
     {
         using var scope = _factory.Services.CreateScope();
 
@@ -132,40 +267,21 @@ public class AuthApiTests : IClassFixture<BoardGameApiFactory>
             password);
 
         user.SetPasswordHash(passwordHash);
+        user.SetRole(role);
 
         context.Users.Add(user);
+
         await context.SaveChangesAsync();
 
         return user;
     }
 
-    [Fact]
-    public async Task GetCurrentUser_WithoutToken_ShouldReturnUnauthorized()
+    // Log in and return the JWT issued by the API.
+    private async Task<string> LoginAsync(
+        string username,
+        string password)
     {
-        await _factory.InitializeDatabaseAsync();
-
-        // Send the request without an authentication token.
-        var response = await _client.GetAsync("/api/auth/me");
-
-        Assert.Equal(
-            HttpStatusCode.Unauthorized,
-            response.StatusCode);
-    }
-
-    [Fact]
-    public async Task GetCurrentUser_WithValidToken_ShouldReturnCurrentUser()
-    {
-        await _factory.InitializeDatabaseAsync();
-
-        var username = $"auth-{Guid.NewGuid():N}";
-        const string password = "Test123!";
-
-        var user = await CreateUserAsync(
-            username,
-            password);
-
-        // Log in to obtain a valid JWT access token.
-        var loginResponse = await _client.PostAsJsonAsync(
+        var response = await _client.PostAsJsonAsync(
             "/api/auth/login",
             new LoginRequest
             {
@@ -175,38 +291,32 @@ public class AuthApiTests : IClassFixture<BoardGameApiFactory>
 
         Assert.Equal(
             HttpStatusCode.OK,
-            loginResponse.StatusCode);
+            response.StatusCode);
 
-        var loginResult =
-            await loginResponse.Content
-                .ReadFromJsonAsync<LoginResponse>();
+        var result = await response.Content
+            .ReadFromJsonAsync<LoginResponse>();
 
-        Assert.NotNull(loginResult);
+        Assert.NotNull(result);
         Assert.False(
-            string.IsNullOrWhiteSpace(loginResult.Token));
+            string.IsNullOrWhiteSpace(result.Token));
 
-        // Send the JWT as a Bearer token to the protected endpoint.
-        using var request = new HttpRequestMessage( // Create a new HttpRequestMessage for the GET request so it doesn't conflict with other requests.
+        return result.Token;
+    }
+
+    // Create a GET request containing the JWT Bearer token.
+    private static HttpRequestMessage CreateAuthorizedGetRequest(
+        string requestUri,
+        string token)
+    {
+        var request = new HttpRequestMessage(
             HttpMethod.Get,
-            "/api/auth/me");
+            requestUri);
 
         request.Headers.Authorization =
             new AuthenticationHeaderValue(
                 "Bearer",
-                loginResult.Token);
+                token);
 
-        var response = await _client.SendAsync(request);
-
-        Assert.Equal(
-            HttpStatusCode.OK,
-            response.StatusCode);
-
-        var result =
-            await response.Content
-                .ReadFromJsonAsync<CurrentUserResponse>();
-
-        Assert.NotNull(result);
-        Assert.Equal(user.Id, result.UserId);
-        Assert.Equal(username, result.Username);
+        return request;
     }
 }

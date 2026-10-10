@@ -1,5 +1,14 @@
-﻿using System.Net;
+﻿
+using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Domain.Enums;
+using Domain.ValueObjects;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
+using Persistence.Repositories;
+using Shared.DTOs.Authentication.Requests;
+using Shared.DTOs.Authentication.Responses;
 using Shared.DTOs.BoardGames.Requests;
 using Shared.DTOs.BoardGames.Responses;
 using Shared.DTOs.Items.Requests;
@@ -163,8 +172,14 @@ public class ItemsApiTests : IClassFixture<BoardGameApiFactory>
         Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
     }
 
+    // Create board game test data using a separate authenticated administrator client.
+    // The main test client remains unauthenticated for the item API assertions.
     private async Task<BoardGameResponse> CreateBoardGameAsync()
     {
+        using var adminClient = _factory.CreateClient();
+
+        await AuthenticateAsAdminAsync(adminClient);
+
         var request = new CreateBoardGameRequest
         {
             Title = $"Item Test Game {Guid.NewGuid():N}",
@@ -179,7 +194,7 @@ public class ItemsApiTests : IClassFixture<BoardGameApiFactory>
             MinimumAge = 12
         };
 
-        var response = await _client.PostAsJsonAsync(
+        var response = await adminClient.PostAsJsonAsync(
             "/api/boardgames",
             request);
 
@@ -191,6 +206,64 @@ public class ItemsApiTests : IClassFixture<BoardGameApiFactory>
         Assert.NotNull(boardGame);
 
         return boardGame;
+    }
+
+    // Create an administrator and authenticate the supplied test client.
+    private async Task AuthenticateAsAdminAsync(HttpClient client)
+    {
+        using var scope = _factory.Services.CreateScope();
+
+        var context = scope.ServiceProvider
+            .GetRequiredService<BoardGameDbContext>();
+
+        var passwordHasher = scope.ServiceProvider
+            .GetRequiredService<IPasswordHasher<User>>();
+
+        var username = $"item-admin-{Guid.NewGuid():N}";
+        const string password = "Test123!";
+
+        var admin = new User(
+            username: username,
+            name: new Name("Item", "Admin"),
+            email: new Email($"{username}@example.com"),
+            dateOfBirth: new DateOnly(2000, 1, 1),
+            address: new Address(
+                "Test Street",
+                "1",
+                "5000",
+                "Odense",
+                "Denmark"));
+
+        var passwordHash = passwordHasher.HashPassword(
+            admin,
+            password);
+
+        admin.SetPasswordHash(passwordHash);
+        admin.SetRole(UserRole.Admin);
+
+        context.Users.Add(admin);
+        await context.SaveChangesAsync();
+
+        var loginResponse = await client.PostAsJsonAsync(
+            "/api/auth/login",
+            new LoginRequest
+            {
+                Username = username,
+                Password = password
+            });
+
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        var loginResult = await loginResponse.Content
+            .ReadFromJsonAsync<LoginResponse>();
+
+        Assert.NotNull(loginResult);
+        Assert.False(string.IsNullOrWhiteSpace(loginResult.Token));
+
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue(
+                "Bearer",
+                loginResult.Token);
     }
 
     private async Task<UserResponse> CreateUserAsync()

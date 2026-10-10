@@ -1,6 +1,14 @@
 ﻿
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Domain.Enums;
+using Domain.ValueObjects;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
+using Persistence.Repositories;
+using Shared.DTOs.Authentication.Requests;
+using Shared.DTOs.Authentication.Responses;
 using Shared.DTOs.BoardGames.Requests;
 using Shared.DTOs.BoardGames.Responses;
 using Shared.DTOs.Items.Requests;
@@ -297,135 +305,6 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
             secondResponse.StatusCode);
     }
 
-    // Creates a complete loan through the API.
-    private async Task<LoanResponse> CreateLoanAsync()
-    {
-        var item = await CreateItemAsync();
-        var borrower = await CreateUserAsync();
-
-        var today = DateOnly.FromDateTime(DateTime.Today);
-
-        var response = await _client.PostAsJsonAsync(
-            "/api/loans",
-            new CreateLoanRequest
-            {
-                LoanDate = today,
-                DueDate = today.AddDays(14),
-                ItemId = item.Id,
-                BorrowerId = borrower.Id
-            });
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-
-        var loan = await response.Content
-            .ReadFromJsonAsync<LoanResponse>();
-
-        Assert.NotNull(loan);
-
-        return loan;
-    }
-
-    // Creates an item with its required board game and owner.
-    private async Task<ItemResponse> CreateItemAsync(
-        int minimumAge = 12)
-    {
-        var boardGame = await CreateBoardGameAsync(minimumAge);
-        var owner = await CreateUserAsync();
-
-        var response = await _client.PostAsJsonAsync(
-            "/api/items",
-            new CreateItemRequest
-            {
-                BoardGameId = boardGame.Id,
-                OwnerId = owner.Id
-            });
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-
-        var item = await response.Content
-            .ReadFromJsonAsync<ItemResponse>();
-
-        Assert.NotNull(item);
-
-        return item;
-    }
-
-    private async Task<BoardGameResponse> CreateBoardGameAsync(
-        int minimumAge)
-    {
-        var request = new CreateBoardGameRequest
-        {
-            Title = $"Loan Test Game {Guid.NewGuid():N}",
-            Description = "Board game created for loan API testing.",
-            Genre = "Strategy",
-            Publisher = "Test Publisher",
-            Edition = null,
-            ReleaseYear = 2025,
-            MinPlayers = 2,
-            MaxPlayers = 4,
-            PlayingTimeMinutes = 60,
-            MinimumAge = minimumAge
-        };
-
-        var response = await _client.PostAsJsonAsync(
-            "/api/boardgames",
-            request);
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-
-        var boardGame = await response.Content
-            .ReadFromJsonAsync<BoardGameResponse>();
-
-        Assert.NotNull(boardGame);
-
-        return boardGame;
-    }
-
-    private async Task<UserResponse> CreateUserAsync(
-        DateOnly? dateOfBirth = null)
-    {
-        var uniqueId = Guid.NewGuid().ToString("N");
-
-        var request = new CreateUserRequest
-        {
-            Username = $"loan-user-{uniqueId}",
-
-            Name = new NameDto
-            {
-                FirstName = "Loan",
-                LastName = "Tester"
-            },
-
-            Email = new EmailDto
-            {
-                Value = $"loan-{uniqueId}@example.com"
-            },
-
-            DateOfBirth = dateOfBirth ?? new DateOnly(1990, 1, 1),
-
-            Address = new AddressDto
-            {
-                Street = "Test Street",
-                HouseNumber = "10",
-                PostalCode = "5000",
-                City = "Odense",
-                Country = "Denmark"
-            }
-        };
-
-        var response = await _client.PostAsJsonAsync(
-            "/api/users",
-            request);
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-
-        var user = await response.Content
-            .ReadFromJsonAsync<UserResponse>();
-
-        Assert.NotNull(user);
-
-        return user;
-    }
     [Fact]
     public async Task CreateLoan_WhenRequestedConcurrently_ShouldAllowOnlyOneLoan()
     {
@@ -457,9 +336,9 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
         // Act
         var requests = new[]
         {
-        _client.PostAsJsonAsync("/api/loans", firstRequest),
-        _client.PostAsJsonAsync("/api/loans", secondRequest)
-    };
+            _client.PostAsJsonAsync("/api/loans", firstRequest),
+            _client.PostAsJsonAsync("/api/loans", secondRequest)
+        };
 
         var responses = await Task.WhenAll(requests);
 
@@ -483,7 +362,6 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
         Assert.Single(loans,
             loan => loan.ItemId == item.Id && !loan.IsReturned);
     }
-
 
     [Fact]
     public async Task ReturnLoan_WithoutRowVersion_ShouldReturnBadRequest()
@@ -574,5 +452,197 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
         Assert.Equal(firstReturnDate, savedLoan.ReturnDate);
     }
 
+    // Creates a complete loan through the API.
+    private async Task<LoanResponse> CreateLoanAsync()
+    {
+        var item = await CreateItemAsync();
+        var borrower = await CreateUserAsync();
 
+        var today = DateOnly.FromDateTime(DateTime.Today);
+
+        var response = await _client.PostAsJsonAsync(
+            "/api/loans",
+            new CreateLoanRequest
+            {
+                LoanDate = today,
+                DueDate = today.AddDays(14),
+                ItemId = item.Id,
+                BorrowerId = borrower.Id
+            });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        var loan = await response.Content
+            .ReadFromJsonAsync<LoanResponse>();
+
+        Assert.NotNull(loan);
+
+        return loan;
+    }
+
+    // Creates an item with its required board game and owner.
+    private async Task<ItemResponse> CreateItemAsync(
+        int minimumAge = 12)
+    {
+        var boardGame = await CreateBoardGameAsync(minimumAge);
+        var owner = await CreateUserAsync();
+
+        var response = await _client.PostAsJsonAsync(
+            "/api/items",
+            new CreateItemRequest
+            {
+                BoardGameId = boardGame.Id,
+                OwnerId = owner.Id
+            });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        var item = await response.Content
+            .ReadFromJsonAsync<ItemResponse>();
+
+        Assert.NotNull(item);
+
+        return item;
+    }
+
+    // Create board game test data using a separate authenticated administrator client.
+    // The main test client remains unchanged for the loan API assertions.
+    private async Task<BoardGameResponse> CreateBoardGameAsync(
+        int minimumAge)
+    {
+        using var adminClient = _factory.CreateClient();
+
+        await AuthenticateAsAdminAsync(adminClient);
+
+        var request = new CreateBoardGameRequest
+        {
+            Title = $"Loan Test Game {Guid.NewGuid():N}",
+            Description = "Board game created for loan API testing.",
+            Genre = "Strategy",
+            Publisher = "Test Publisher",
+            Edition = null,
+            ReleaseYear = 2025,
+            MinPlayers = 2,
+            MaxPlayers = 4,
+            PlayingTimeMinutes = 60,
+            MinimumAge = minimumAge
+        };
+
+        var response = await adminClient.PostAsJsonAsync(
+            "/api/boardgames",
+            request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        var boardGame = await response.Content
+            .ReadFromJsonAsync<BoardGameResponse>();
+
+        Assert.NotNull(boardGame);
+
+        return boardGame;
+    }
+
+    // Create an administrator and authenticate the supplied test client.
+    private async Task AuthenticateAsAdminAsync(HttpClient client)
+    {
+        using var scope = _factory.Services.CreateScope();
+
+        var context = scope.ServiceProvider
+            .GetRequiredService<BoardGameDbContext>();
+
+        var passwordHasher = scope.ServiceProvider
+            .GetRequiredService<IPasswordHasher<User>>();
+
+        var username = $"loan-admin-{Guid.NewGuid():N}";
+        const string password = "Test123!";
+
+        var admin = new User(
+            username: username,
+            name: new Name("Loan", "Admin"),
+            email: new Email($"{username}@example.com"),
+            dateOfBirth: new DateOnly(2000, 1, 1),
+            address: new Address(
+                "Test Street",
+                "1",
+                "5000",
+                "Odense",
+                "Denmark"));
+
+        var passwordHash = passwordHasher.HashPassword(
+            admin,
+            password);
+
+        admin.SetPasswordHash(passwordHash);
+        admin.SetRole(UserRole.Admin);
+
+        context.Users.Add(admin);
+        await context.SaveChangesAsync();
+
+        var loginResponse = await client.PostAsJsonAsync(
+            "/api/auth/login",
+            new LoginRequest
+            {
+                Username = username,
+                Password = password
+            });
+
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        var loginResult = await loginResponse.Content
+            .ReadFromJsonAsync<LoginResponse>();
+
+        Assert.NotNull(loginResult);
+        Assert.False(string.IsNullOrWhiteSpace(loginResult.Token));
+
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue(
+                "Bearer",
+                loginResult.Token);
+    }
+
+    private async Task<UserResponse> CreateUserAsync(
+        DateOnly? dateOfBirth = null)
+    {
+        var uniqueId = Guid.NewGuid().ToString("N");
+
+        var request = new CreateUserRequest
+        {
+            Username = $"loan-user-{uniqueId}",
+
+            Name = new NameDto
+            {
+                FirstName = "Loan",
+                LastName = "Tester"
+            },
+
+            Email = new EmailDto
+            {
+                Value = $"loan-{uniqueId}@example.com"
+            },
+
+            DateOfBirth = dateOfBirth ?? new DateOnly(1990, 1, 1),
+
+            Address = new AddressDto
+            {
+                Street = "Test Street",
+                HouseNumber = "10",
+                PostalCode = "5000",
+                City = "Odense",
+                Country = "Denmark"
+            }
+        };
+
+        var response = await _client.PostAsJsonAsync(
+            "/api/users",
+            request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        var user = await response.Content
+            .ReadFromJsonAsync<UserResponse>();
+
+        Assert.NotNull(user);
+
+        return user;
+    }
 }

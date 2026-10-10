@@ -1,5 +1,6 @@
 ﻿using Domain.Exceptions.CustomExceptions;
 using Domain.ValueObjects;
+using Domain.Enums;
 
 public class User
 {
@@ -11,6 +12,7 @@ public class User
     public DateOnly DateOfBirth { get; private set; }
     public Address Address { get; private set; } = null!;
     public string PasswordHash { get; private set; } = ""; // Store the hashed password
+    public UserRole Role { get; private set; } = UserRole.User; // Default role is User
 
     // Used by EF Core when materializing users from the database.
     private User()
@@ -69,5 +71,11 @@ public class User
         }
 
         PasswordHash = passwordHash;
+    }
+
+    // Change the authorization role assigned to the user.
+    public void SetRole(UserRole role)
+    {
+        Role = role;
     }
 }

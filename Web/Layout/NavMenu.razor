@@ -6,7 +6,9 @@
 
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
-        <a class="navbar-brand" href="">BoardGameCollection</a>
+        <a class="navbar-brand" href="">
+            BoardGameCollection
+        </a>
 
         <button title="Navigation menu"
                 class="navbar-toggler"
@@ -44,8 +46,21 @@
             <Authorized Context="authContext">
 
                 <div class="nav-item px-3">
-                    <span class="nav-link">
-                        @authContext.User.Identity?.Name
+                    <span class="nav-link text-white">
+                        @if (authContext.User.IsInRole("Admin"))
+                        {
+                            <text>
+                                Du er nu logget ind som administrator
+                                "@authContext.User.Identity?.Name"
+                            </text>
+                        }
+                        else
+                        {
+                            <text>
+                                Du er nu logget ind som bruger
+                                "@authContext.User.Identity?.Name"
+                            </text>
+                        }
                     </span>
                 </div>
 

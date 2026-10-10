@@ -74,15 +74,20 @@ public sealed class AuthController : ControllerBase
         StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public ActionResult<CurrentUserResponse> GetCurrentUser()
-    {
+    {// Read the authenticated user's identity and role directly from the validated JWT
+     // to avoid an unnecessary database query.
         var userIdValue = User.FindFirstValue(
             ClaimTypes.NameIdentifier);
 
         var username = User.FindFirstValue(
             ClaimTypes.Name);
 
+        var role = User.FindFirstValue(
+            ClaimTypes.Role);
+
         if (!Guid.TryParse(userIdValue, out var userId) ||
-            string.IsNullOrWhiteSpace(username))
+        string.IsNullOrWhiteSpace(username) ||
+        string.IsNullOrWhiteSpace(role))
         {
             return Unauthorized();
         }
@@ -90,7 +95,20 @@ public sealed class AuthController : ControllerBase
         return Ok(new CurrentUserResponse
         {
             UserId = userId,
-            Username = username
+            Username = username,
+            Role = role
         });
     }
+
+    // Verify that the current user has the administrator role.
+    [Authorize(Roles = "Admin")]
+    [HttpGet("admin")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public ActionResult GetAdminAccess()
+    {
+        return Ok();
+    }
+
 }

@@ -6,6 +6,7 @@ using Shared.DTOs.BoardGames.Responses;
 using Domain.Models;
 using Shared.DTOs.BoardGames.Requests;
 using Shared.DTOs.Common;
+using Microsoft.AspNetCore.Authorization;
 
 namespace API.Controllers;
 
@@ -177,6 +178,7 @@ public class BoardGamesController : ControllerBase
         return Ok(boardGame);
     }
 
+    [Authorize(Roles = "Admin")] // Only users with the "Admin" role can create board games.
     [HttpPost]
     public async Task<ActionResult<BoardGameResponse>> CreateBoardGame(
         CreateBoardGameRequest request)
@@ -221,6 +223,7 @@ public class BoardGamesController : ControllerBase
             response);
     }
 
+    [Authorize(Roles = "Admin")] // Only users with the "Admin" role can update board games.
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(BoardGameResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -300,7 +303,7 @@ public class BoardGamesController : ControllerBase
         });
     }
 
-
+    [Authorize(Roles = "Admin")] // Only users with the "Admin" role can delete board games.
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

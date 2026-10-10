@@ -36,6 +36,12 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.DateOfBirth)
             .IsRequired();
 
+        // Store the user's authorization role as a readable string.
+        builder.Property(user => user.Role)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .IsRequired();
+
         // Name value object
         builder.ComplexProperty(u => u.Name, name => //ComplexProperty is used to configure value objects in EF Core
         {

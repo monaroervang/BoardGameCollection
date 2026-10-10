@@ -1,9 +1,16 @@
-﻿
-using System.Net;
-using System.Net.Http.Json;
+﻿using Domain.Enums;
+using Domain.ValueObjects;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
+using Persistence.Repositories;
+using Shared.DTOs.Authentication.Requests;
+using Shared.DTOs.Authentication.Responses;
 using Shared.DTOs.BoardGames.Requests;
 using Shared.DTOs.BoardGames.Responses;
 using Shared.DTOs.Common;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 
 namespace API.Tests;
 
@@ -36,6 +43,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var request = CreateValidBoardGameRequest();
 
@@ -74,10 +82,53 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     }
 
     [Fact]
+    public async Task CreateBoardGame_WithoutAuthentication_ShouldReturnUnauthorized()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        // Ensure that this request is sent without authentication.
+        _client.DefaultRequestHeaders.Authorization = null;
+
+        var request = CreateValidBoardGameRequest();
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            "/api/boardgames",
+            request);
+
+        // Assert
+        Assert.Equal(
+            HttpStatusCode.Unauthorized,
+            response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateBoardGame_WithUserRole_ShouldReturnForbidden()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsUserAsync();
+
+        var request = CreateValidBoardGameRequest();
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            "/api/boardgames",
+            request);
+
+        // Assert
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            response.StatusCode);
+    }
+
+    [Fact]
     public async Task CreateBoardGame_WithInvalidPlayerCount_ShouldReturnBadRequest()
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var request = CreateValidBoardGameRequest() with
         {
@@ -98,6 +149,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var createdBoardGame = await CreateBoardGameAsync();
 
@@ -144,39 +196,70 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
             savedBoardGame.RowVersion);
     }
 
-
     [Fact]
-    public async Task DeleteBoardGame_ShouldReturnNoContent()
+    public async Task UpdateBoardGame_WithoutAuthentication_ShouldReturnUnauthorized()
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var boardGame = await CreateBoardGameAsync();
 
-        using var request = CreateDeleteRequest(boardGame);
+        var updateRequest = CreateUpdateRequest(
+            boardGame,
+            "Unauthorized Update");
+
+        // Remove authentication after creating the test data.
+        _client.DefaultRequestHeaders.Authorization = null;
 
         // Act
-        var response = await _client.SendAsync(request);
+        var response = await _client.PutAsJsonAsync(
+            $"/api/boardgames/{boardGame.Id}",
+            updateRequest);
 
         // Assert
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-
-        var getResponse = await _client.GetAsync(
-            $"/api/boardgames/{boardGame.Id}");
-
-        Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
+        Assert.Equal(
+            HttpStatusCode.Unauthorized,
+            response.StatusCode);
     }
 
+    [Fact]
+    public async Task UpdateBoardGame_WithUserRole_ShouldReturnForbidden()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
+
+        var boardGame = await CreateBoardGameAsync();
+
+        var updateRequest = CreateUpdateRequest(
+            boardGame,
+            "Forbidden Update");
+
+        // Replace the administrator token with a regular user token.
+        await AuthenticateAsUserAsync();
+
+        // Act
+        var response = await _client.PutAsJsonAsync(
+            $"/api/boardgames/{boardGame.Id}",
+            updateRequest);
+
+        // Assert
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            response.StatusCode);
+    }
 
     [Fact]
     public async Task UpdateBoardGame_WithStaleRowVersion_ShouldReturnConflict()
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var originalBoardGame = await CreateBoardGameAsync();
 
-        // Both users initially have the same version.
+        // Both clients initially have the same version.
         var firstUpdate = CreateUpdateRequest(
             originalBoardGame,
             "First User Update");
@@ -185,7 +268,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
             originalBoardGame,
             "Second User Update");
 
-        // The first user saves successfully.
+        // The first update saves successfully.
         var firstResponse = await _client.PutAsJsonAsync(
             $"/api/boardgames/{originalBoardGame.Id}",
             firstUpdate);
@@ -194,7 +277,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
             HttpStatusCode.OK,
             firstResponse.StatusCode);
 
-        // Act: The second user submits the outdated version.
+        // Act: Submit the outdated version.
         var secondResponse = await _client.PutAsJsonAsync(
             $"/api/boardgames/{originalBoardGame.Id}",
             secondUpdate);
@@ -210,6 +293,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var originalBoardGame = await CreateBoardGameAsync();
 
@@ -221,7 +305,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
             originalBoardGame,
             "Second User Update");
 
-        // The first user saves successfully.
+        // The first update saves successfully.
         var firstResponse = await _client.PutAsJsonAsync(
             $"/api/boardgames/{originalBoardGame.Id}",
             firstUpdate);
@@ -235,7 +319,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
 
         Assert.NotNull(firstResult);
 
-        // Act: The second user attempts to overwrite the first update.
+        // Act: Attempt to overwrite the first update with a stale version.
         var secondResponse = await _client.PutAsJsonAsync(
             $"/api/boardgames/{originalBoardGame.Id}",
             secondUpdate);
@@ -253,7 +337,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
         var savedBoardGame = await getResponse.Content
             .ReadFromJsonAsync<BoardGameResponse>();
 
-        // Assert: The first user's changes must remain intact.
+        // The first update must remain intact.
         Assert.NotNull(savedBoardGame);
         Assert.Equal("First User Update", savedBoardGame.Title);
         Assert.NotEqual("Second User Update", savedBoardGame.Title);
@@ -263,65 +347,73 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
             savedBoardGame.RowVersion);
     }
 
-    // Creates a valid board game with a unique title.
-    private static CreateBoardGameRequest CreateValidBoardGameRequest()
+    [Fact]
+    public async Task DeleteBoardGame_ShouldReturnNoContent()
     {
-        return new CreateBoardGameRequest
-        {
-            Title = $"API Test Game {Guid.NewGuid():N}",
-            Description = "Created by an API integration test.",
-            Genre = "Strategy",
-            Publisher = "Test Publisher",
-            Edition = "First Edition",
-            ReleaseYear = 2025,
-            MinPlayers = 2,
-            MaxPlayers = 4,
-            PlayingTimeMinutes = 60,
-            MinimumAge = 12
-        };
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
+
+        var boardGame = await CreateBoardGameAsync();
+
+        using var request = CreateDeleteRequest(boardGame);
+
+        // Act
+        var response = await _client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+        var getResponse = await _client.GetAsync(
+            $"/api/boardgames/{boardGame.Id}");
+
+        Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
     }
 
-    // Creates and returns a board game through the API.
-    private async Task<BoardGameResponse> CreateBoardGameAsync()
+    [Fact]
+    public async Task DeleteBoardGame_WithoutAuthentication_ShouldReturnUnauthorized()
     {
-        var request = CreateValidBoardGameRequest();
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
-        var response = await _client.PostAsJsonAsync(
-            "/api/boardgames",
-            request);
+        var boardGame = await CreateBoardGameAsync();
 
+        using var request = CreateDeleteRequest(boardGame);
+
+        // Remove authentication after creating the test data.
+        _client.DefaultRequestHeaders.Authorization = null;
+
+        // Act
+        var response = await _client.SendAsync(request);
+
+        // Assert
         Assert.Equal(
-            HttpStatusCode.Created,
+            HttpStatusCode.Unauthorized,
             response.StatusCode);
-
-        var boardGame = await response.Content
-            .ReadFromJsonAsync<BoardGameResponse>();
-
-        Assert.NotNull(boardGame);
-        Assert.Equal(8, boardGame.RowVersion.Length);
-
-        return boardGame;
     }
 
-    // Creates an update request using the version originally retrieved.
-    private static UpdateBoardGameRequest CreateUpdateRequest(
-        BoardGameResponse boardGame,
-        string title)
+    [Fact]
+    public async Task DeleteBoardGame_WithUserRole_ShouldReturnForbidden()
     {
-        return new UpdateBoardGameRequest
-        {
-            Title = title,
-            Description = "Updated description.",
-            Genre = "Adventure",
-            Publisher = "Updated Publisher",
-            Edition = "Second Edition",
-            ReleaseYear = 2025,
-            MinPlayers = 1,
-            MaxPlayers = 5,
-            PlayingTimeMinutes = 90,
-            MinimumAge = 10,
-            RowVersion = boardGame.RowVersion
-        };
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
+
+        var boardGame = await CreateBoardGameAsync();
+
+        using var request = CreateDeleteRequest(boardGame);
+
+        // Replace the administrator token with a regular user token.
+        await AuthenticateAsUserAsync();
+
+        // Act
+        var response = await _client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            response.StatusCode);
     }
 
     [Fact]
@@ -329,6 +421,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var boardGame = await CreateBoardGameAsync();
 
@@ -351,10 +444,11 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var original = await CreateBoardGameAsync();
 
-        // Another user updates the board game.
+        // Update the board game to generate a new RowVersion.
         var updateRequest = CreateUpdateRequest(
             original,
             "Updated Before Delete");
@@ -385,34 +479,14 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
 
         Assert.NotNull(saved);
         Assert.Equal("Updated Before Delete", saved.Title);
-
-
     }
-
-    private static HttpRequestMessage CreateDeleteRequest(
-        BoardGameResponse boardGame)
-    {
-        var request = new HttpRequestMessage(
-            HttpMethod.Delete,
-            $"/api/boardgames/{boardGame.Id}");
-
-        // Send the version originally retrieved by the client.
-        var encodedVersion = Convert.ToBase64String(
-            boardGame.RowVersion);
-
-        request.Headers.TryAddWithoutValidation(
-            "If-Match",
-            $"\"{encodedVersion}\"");
-
-        return request;
-    }
-
 
     [Fact]
     public async Task GetBoardGames_WithSearch_ShouldReturnMatchingTitles()
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var uniqueTerm = Guid.NewGuid().ToString("N");
 
@@ -446,6 +520,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         await CreateBoardGameAsync();
 
@@ -474,6 +549,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var uniqueTerm = Guid.NewGuid().ToString("N");
 
@@ -503,6 +579,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var firstGame = await CreateBoardGameAsync();
         var secondGame = await CreateBoardGameAsync();
@@ -523,40 +600,17 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
 
         Assert.NotNull(games);
 
-        // Other seeded games may exist, so verify our two games are present.
+        // Other test data may exist, so verify our two games are present.
         Assert.Contains(games, game => game.Id == firstGame.Id);
         Assert.Contains(games, game => game.Id == secondGame.Id);
     }
-
-    // Creates a board game with a specific title through the API.
-    private async Task<BoardGameResponse> CreateBoardGameWithTitleAsync(
-        string title)
-    {
-        var request = CreateValidBoardGameRequest() with
-        {
-            Title = title
-        };
-
-        var response = await _client.PostAsJsonAsync(
-            "/api/boardgames",
-            request);
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-
-        var boardGame = await response.Content
-            .ReadFromJsonAsync<BoardGameResponse>();
-
-        Assert.NotNull(boardGame);
-
-        return boardGame;
-    }
-
 
     [Fact]
     public async Task GetBoardGames_WithGenreFilter_ShouldReturnMatchingGames()
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var uniqueGenre = $"Genre-{Guid.NewGuid():N}";
 
@@ -591,17 +645,22 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
         Assert.Equal(matchingGame.Id, result.Items[0].Id);
         Assert.Equal(uniqueGenre, result.Items[0].Genre);
     }
+
     [Fact]
     public async Task GetBoardGames_WithPlayersFilter_ShouldReturnSupportedGames()
     {
+        // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var matchingGame = await CreateBoardGameAsync();
 
+        // Act
         // The existing helper creates games for 2-4 players.
         var response = await _client.GetAsync(
             "/api/boardgames?players=4&page=1&pageSize=100");
 
+        // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var result = await response.Content
@@ -647,24 +706,29 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     [Fact]
     public async Task GetBoardGames_WithCombinedFilters_ShouldReturnMatchingGames()
     {
+        // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var uniqueTerm = Guid.NewGuid().ToString("N");
 
         var matchingGame = await CreateBoardGameWithTitleAsync(
             $"Catan {uniqueTerm}");
 
+        // Act
         // Combine title search, genre, players and age.
         var response = await _client.GetAsync(
             $"/api/boardgames?search={uniqueTerm}" +
             "&genre=Strategy&players=4&age=12");
 
+        // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var result = await response.Content
             .ReadFromJsonAsync<PagedResponse<BoardGameResponse>>();
 
         Assert.NotNull(result);
+
         var games = result.Items;
 
         Assert.NotNull(games);
@@ -679,49 +743,54 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     public async Task GetBoardGames_WithInvalidFilters_ShouldReturnBadRequest(
         string query)
     {
+        // Arrange
         await _factory.InitializeDatabaseAsync();
 
+        // Act
         var response = await _client.GetAsync(
             $"/api/boardgames?{query}");
 
+        // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
-    public async Task GetBoardGames_WithPagination_ShouldReturnRequestedPageSize() // Test for page size and total pages
+    public async Task GetBoardGames_WithPagination_ShouldReturnRequestedPageSize()
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var uniqueTerm = Guid.NewGuid().ToString("N");
 
-        await CreateBoardGameWithTitleAsync($"Game A {uniqueTerm}"); //Unique titles to ensure they are included in the search results
+        await CreateBoardGameWithTitleAsync($"Game A {uniqueTerm}");
         await CreateBoardGameWithTitleAsync($"Game B {uniqueTerm}");
         await CreateBoardGameWithTitleAsync($"Game C {uniqueTerm}");
 
         // Act
         var response = await _client.GetAsync(
-            $"/api/boardgames?search={uniqueTerm}&page=1&pageSize=2"); // Requesting the first page with a page size of 2
+            $"/api/boardgames?search={uniqueTerm}&page=1&pageSize=2");
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var result = await response.Content
-            .ReadFromJsonAsync<PagedResponse<BoardGameResponse>>(); // Deserialize the response into a PagedResponse object
+            .ReadFromJsonAsync<PagedResponse<BoardGameResponse>>();
 
         Assert.NotNull(result);
-        Assert.Equal(1, result.Page); // Verify that the current page is 1
-        Assert.Equal(2, result.PageSize); // Verify that the page size is 2
-        Assert.Equal(3, result.TotalCount); // Verify that the total count of items is 3 (the number of games created)
-        Assert.Equal(2, result.TotalPages); // Verify that the total number of pages is 2 (3 items with a page size of 2 results in 2 pages)
-        Assert.Equal(2, result.Items.Count); // Verify that the number of items returned in the current page is 2 (the requested page size)
+        Assert.Equal(1, result.Page);
+        Assert.Equal(2, result.PageSize);
+        Assert.Equal(3, result.TotalCount);
+        Assert.Equal(2, result.TotalPages);
+        Assert.Equal(2, result.Items.Count);
     }
 
     [Fact]
-    public async Task GetBoardGames_WithPagination_ShouldReturnSecondPage() // Test for retrieving the second page of results
+    public async Task GetBoardGames_WithPagination_ShouldReturnSecondPage()
     {
         // Arrange
         await _factory.InitializeDatabaseAsync();
+        await AuthenticateAsAdminAsync();
 
         var uniqueTerm = Guid.NewGuid().ToString("N");
 
@@ -753,7 +822,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
     [InlineData(1, 0)]
     [InlineData(1, -1)]
     [InlineData(1, 101)]
-    public async Task GetBoardGames_WithInvalidPagination_ShouldReturnBadRequest( // Test for invalid pagination parameters
+    public async Task GetBoardGames_WithInvalidPagination_ShouldReturnBadRequest(
         int page,
         int pageSize)
     {
@@ -768,6 +837,179 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    // Creates a valid board game with a unique title.
+    private static CreateBoardGameRequest CreateValidBoardGameRequest()
+    {
+        return new CreateBoardGameRequest
+        {
+            Title = $"API Test Game {Guid.NewGuid():N}",
+            Description = "Created by an API integration test.",
+            Genre = "Strategy",
+            Publisher = "Test Publisher",
+            Edition = "First Edition",
+            ReleaseYear = 2025,
+            MinPlayers = 2,
+            MaxPlayers = 4,
+            PlayingTimeMinutes = 60,
+            MinimumAge = 12
+        };
+    }
 
+    // Creates and returns a board game through the API.
+    // The client must already be authenticated as an administrator.
+    private async Task<BoardGameResponse> CreateBoardGameAsync()
+    {
+        var request = CreateValidBoardGameRequest();
 
+        var response = await _client.PostAsJsonAsync(
+            "/api/boardgames",
+            request);
+
+        Assert.Equal(
+            HttpStatusCode.Created,
+            response.StatusCode);
+
+        var boardGame = await response.Content
+            .ReadFromJsonAsync<BoardGameResponse>();
+
+        Assert.NotNull(boardGame);
+        Assert.Equal(8, boardGame.RowVersion.Length);
+
+        return boardGame;
+    }
+
+    // Creates a board game with a specific title through the API.
+    // The client must already be authenticated as an administrator.
+    private async Task<BoardGameResponse> CreateBoardGameWithTitleAsync(
+        string title)
+    {
+        var request = CreateValidBoardGameRequest() with
+        {
+            Title = title
+        };
+
+        var response = await _client.PostAsJsonAsync(
+            "/api/boardgames",
+            request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        var boardGame = await response.Content
+            .ReadFromJsonAsync<BoardGameResponse>();
+
+        Assert.NotNull(boardGame);
+
+        return boardGame;
+    }
+
+    // Creates an update request using the version originally retrieved.
+    private static UpdateBoardGameRequest CreateUpdateRequest(
+        BoardGameResponse boardGame,
+        string title)
+    {
+        return new UpdateBoardGameRequest
+        {
+            Title = title,
+            Description = "Updated description.",
+            Genre = "Adventure",
+            Publisher = "Updated Publisher",
+            Edition = "Second Edition",
+            ReleaseYear = 2025,
+            MinPlayers = 1,
+            MaxPlayers = 5,
+            PlayingTimeMinutes = 90,
+            MinimumAge = 10,
+            RowVersion = boardGame.RowVersion
+        };
+    }
+
+    // Creates a DELETE request containing the version originally retrieved.
+    private static HttpRequestMessage CreateDeleteRequest(
+        BoardGameResponse boardGame)
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"/api/boardgames/{boardGame.Id}");
+
+        var encodedVersion = Convert.ToBase64String(
+            boardGame.RowVersion);
+
+        request.Headers.TryAddWithoutValidation(
+            "If-Match",
+            $"\"{encodedVersion}\"");
+
+        return request;
+    }
+
+    // Create a user with the specified role and configure the client with a valid JWT.
+    private async Task AuthenticateAsync(UserRole role)
+    {
+        using var scope = _factory.Services.CreateScope();
+
+        var context = scope.ServiceProvider
+            .GetRequiredService<BoardGameDbContext>();
+
+        var passwordHasher = scope.ServiceProvider
+            .GetRequiredService<IPasswordHasher<User>>();
+
+        var username = $"auth-{Guid.NewGuid():N}";
+        const string password = "Test123!";
+
+        var user = new User(
+            username: username,
+            name: new Name("API", "Test User"),
+            email: new Email($"{username}@example.com"),
+            dateOfBirth: new DateOnly(2000, 1, 1),
+            address: new Address(
+                "Test Street",
+                "1",
+                "7100",
+                "Test City",
+                "Denmark"));
+
+        var passwordHash = passwordHasher.HashPassword(
+            user,
+            password);
+
+        user.SetPasswordHash(passwordHash);
+        user.SetRole(role);
+
+        context.Users.Add(user);
+        await context.SaveChangesAsync();
+
+        var loginResponse = await _client.PostAsJsonAsync(
+            "/api/auth/login",
+            new LoginRequest
+            {
+                Username = username,
+                Password = password
+            });
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            loginResponse.StatusCode);
+
+        var loginResult = await loginResponse.Content
+            .ReadFromJsonAsync<LoginResponse>();
+
+        Assert.NotNull(loginResult);
+        Assert.False(string.IsNullOrWhiteSpace(loginResult.Token));
+
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue(
+                "Bearer",
+                loginResult.Token);
+    }
+
+    // Authenticate the client as an administrator.
+    private Task AuthenticateAsAdminAsync()
+    {
+        return AuthenticateAsync(UserRole.Admin);
+    }
+
+    // Authenticate the client as a regular user.
+    private Task AuthenticateAsUserAsync()
+    {
+        return AuthenticateAsync(UserRole.User);
+    }
 }
