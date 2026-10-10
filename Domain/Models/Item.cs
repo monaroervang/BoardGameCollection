@@ -1,6 +1,6 @@
 ﻿namespace Domain.Models;
 
-public class Item // Represents an item (Boardgame) owned by a user and available for loan
+public class Item // Represents a physical board game owned by a user
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
 
@@ -8,13 +8,39 @@ public class Item // Represents an item (Boardgame) owned by a user and availabl
 
     public Guid OwnerId { get; private set; }
 
-    public Item() //Empty EF-core constructor
+    public bool IsArchived { get; private set; } = false;
+
+    public Item() // Empty EF Core constructor
     {
     }
 
-    public Item(Guid boardGameId, Guid ownerId) // Constructor to create a new item with the specified board game ID and owner ID
+    public Item(Guid boardGameId, Guid ownerId) // Creates a physical board game owned by a user
     {
         BoardGameId = boardGameId;
         OwnerId = ownerId;
+    }
+
+    // Archives the item without deleting it or its loan history.
+    public void Archive()
+    {
+        if (IsArchived)
+        {
+            throw new InvalidOperationException(
+                "The item is already archived.");
+        }
+
+        IsArchived = true;
+    }
+
+    // Makes an archived item active again.
+    public void Reactivate()
+    {
+        if (!IsArchived)
+        {
+            throw new InvalidOperationException(
+                "The item is already active.");
+        }
+
+        IsArchived = false;
     }
 }

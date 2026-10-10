@@ -3,8 +3,10 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Domain.Enums;
+using Domain.Models;
 using Domain.ValueObjects;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Persistence.Repositories;
 using Shared.DTOs.Authentication.Requests;
@@ -15,9 +17,6 @@ using Shared.DTOs.Items.Requests;
 using Shared.DTOs.Items.Responses;
 using Shared.DTOs.Loans.Requests;
 using Shared.DTOs.Loans.Responses;
-using Shared.DTOs.Users.Requests;
-using Shared.DTOs.Users.Responses;
-using Shared.DTOs.ValueObjects;
 
 namespace API.Tests;
 
@@ -37,24 +36,50 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
     {
         await _factory.InitializeDatabaseAsync();
 
-        var response = await _client.GetAsync("/api/loans");
+        using var adminClient = _factory.CreateClient();
+        await AuthenticateAsync(adminClient, UserRole.Admin);
+
+        var response = await adminClient.GetAsync("/api/loans");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
+    public async Task GetLoans_WithoutAuthentication_ShouldReturnUnauthorized()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var response = await _client.GetAsync("/api/loans");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetLoans_WithUserRole_ShouldReturnForbidden()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        using var userClient = _factory.CreateClient();
+        await AuthenticateAsync(userClient, UserRole.User);
+
+        var response = await userClient.GetAsync("/api/loans");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
     public async Task GetLoan_WithExistingId_ShouldReturnOk()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
         var loan = await CreateLoanAsync();
 
-        // Act
-        var response = await _client.GetAsync(
+        using var borrowerClient = _factory.CreateClient();
+        await AuthenticateAsBorrowerAsync(borrowerClient, loan.Id);
+
+        var response = await borrowerClient.GetAsync(
             $"/api/loans/{loan.Id}");
 
-        // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var result = await response.Content
@@ -71,35 +96,128 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
     {
         await _factory.InitializeDatabaseAsync();
 
-        var response = await _client.GetAsync(
+        using var userClient = _factory.CreateClient();
+        await AuthenticateAsync(userClient, UserRole.User);
+
+        var response = await userClient.GetAsync(
             $"/api/loans/{Guid.NewGuid()}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
-    public async Task CreateLoan_ShouldReturnCreated()
+    public async Task GetLoan_WithoutAuthentication_ShouldReturnUnauthorized()
     {
-        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        var loan = await CreateLoanAsync();
+
+        var response = await _client.GetAsync(
+            $"/api/loans/{loan.Id}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetLoan_WhenUserIsNotBorrowerOrOwner_ShouldReturnForbidden()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var loan = await CreateLoanAsync();
+
+        using var otherClient = _factory.CreateClient();
+        await AuthenticateAsync(otherClient, UserRole.User);
+
+        var response = await otherClient.GetAsync(
+            $"/api/loans/{loan.Id}");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetLoan_WhenUserIsOwner_ShouldReturnOk()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var loan = await CreateLoanAsync();
+
+        using var ownerClient = _factory.CreateClient();
+        await AuthenticateAsOwnerAsync(ownerClient, loan.ItemId);
+
+        var response = await ownerClient.GetAsync(
+            $"/api/loans/{loan.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var result = await response.Content
+            .ReadFromJsonAsync<LoanResponse>();
+
+        Assert.NotNull(result);
+        Assert.Equal(loan.Id, result.Id);
+        Assert.Equal(loan.BorrowerId, result.BorrowerId);
+    }
+
+    [Fact]
+    public async Task GetLoan_WhenUserIsAdmin_ShouldReturnOk()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var loan = await CreateLoanAsync();
+
+        using var adminClient = _factory.CreateClient();
+        await AuthenticateAsync(adminClient, UserRole.Admin);
+
+        var response = await adminClient.GetAsync(
+            $"/api/loans/{loan.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateLoan_WithoutToken_ShouldReturnUnauthorized()
+    {
         await _factory.InitializeDatabaseAsync();
 
         var item = await CreateItemAsync();
-        var borrower = await CreateUserAsync();
+        var today = DateOnly.FromDateTime(DateTime.Today);
+
+        var response = await _client.PostAsJsonAsync(
+            "/api/loans",
+            new CreateLoanRequest
+            {
+                LoanDate = today,
+                DueDate = today.AddDays(14),
+                ItemId = item.Id
+            });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateLoan_ShouldReturnCreated()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var item = await CreateItemAsync();
+
+        using var borrowerClient = _factory.CreateClient();
+        var borrowerId = await AuthenticateAsync(
+            borrowerClient,
+            UserRole.User);
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
 
         var request = new CreateLoanRequest
         {
-            LoanDate = DateOnly.FromDateTime(DateTime.Today),
-            DueDate = DateOnly.FromDateTime(DateTime.Today).AddDays(14),
-            ItemId = item.Id,
-            BorrowerId = borrower.Id
+            LoanDate = today,
+            DueDate = today.AddDays(14),
+            ItemId = item.Id
         };
 
-        // Act
-        var response = await _client.PostAsJsonAsync(
+        var response = await borrowerClient.PostAsJsonAsync(
             "/api/loans",
             request);
 
-        // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
         var loan = await response.Content
@@ -108,13 +226,13 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
         Assert.NotNull(loan);
         Assert.NotEqual(Guid.Empty, loan.Id);
         Assert.Equal(item.Id, loan.ItemId);
-        Assert.Equal(borrower.Id, loan.BorrowerId);
+        Assert.Equal(borrowerId, loan.BorrowerId);
         Assert.False(loan.IsReturned);
         Assert.False(loan.IsOverdue);
         Assert.Null(loan.ReturnDate);
 
-        // Verify that the loan was persisted.
-        var getResponse = await _client.GetAsync(
+        // The borrower can retrieve their own loan.
+        var getResponse = await borrowerClient.GetAsync(
             $"/api/loans/{loan.Id}");
 
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
@@ -124,131 +242,121 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
 
         Assert.NotNull(savedLoan);
         Assert.Equal(loan.Id, savedLoan.Id);
+        Assert.Equal(borrowerId, savedLoan.BorrowerId);
     }
 
     [Fact]
     public async Task CreateLoan_WithPastLoanDate_ShouldReturnBadRequest()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
         var item = await CreateItemAsync();
-        var borrower = await CreateUserAsync();
+
+        using var borrowerClient = _factory.CreateClient();
+        await AuthenticateAsync(borrowerClient, UserRole.User);
 
         var request = new CreateLoanRequest
         {
             LoanDate = DateOnly.FromDateTime(DateTime.Today).AddDays(-1),
             DueDate = DateOnly.FromDateTime(DateTime.Today).AddDays(14),
-            ItemId = item.Id,
-            BorrowerId = borrower.Id
+            ItemId = item.Id
         };
 
-        // Act
-        var response = await _client.PostAsJsonAsync(
+        var response = await borrowerClient.PostAsJsonAsync(
             "/api/loans",
             request);
 
-        // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
     public async Task CreateLoan_WhenBorrowerIsTooYoung_ShouldReturnBadRequest()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
         var item = await CreateItemAsync(minimumAge: 18);
 
-        // The user is old enough to register but too young for this game.
-        var borrower = await CreateUserAsync(
-            dateOfBirth: DateOnly.FromDateTime(DateTime.Today).AddYears(-13));
+        using var borrowerClient = _factory.CreateClient();
+
+        await AuthenticateAsync(
+            borrowerClient,
+            UserRole.User,
+            dateOfBirth: DateOnly.FromDateTime(DateTime.Today)
+                .AddYears(-13));
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
 
         var request = new CreateLoanRequest
         {
-            LoanDate = DateOnly.FromDateTime(DateTime.Today),
-            DueDate = DateOnly.FromDateTime(DateTime.Today).AddDays(14),
-            ItemId = item.Id,
-            BorrowerId = borrower.Id
+            LoanDate = today,
+            DueDate = today.AddDays(14),
+            ItemId = item.Id
         };
 
-        // Act
-        var response = await _client.PostAsJsonAsync(
+        var response = await borrowerClient.PostAsJsonAsync(
             "/api/loans",
             request);
 
-        // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
     public async Task CreateLoan_WhenItemIsAlreadyBorrowed_ShouldReturnConflict()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
         var item = await CreateItemAsync();
 
-        var firstBorrower = await CreateUserAsync();
-        var secondBorrower = await CreateUserAsync();
+        using var firstBorrowerClient = _factory.CreateClient();
+        using var secondBorrowerClient = _factory.CreateClient();
+
+        await AuthenticateAsync(firstBorrowerClient, UserRole.User);
+        await AuthenticateAsync(secondBorrowerClient, UserRole.User);
 
         var today = DateOnly.FromDateTime(DateTime.Today);
 
-        var firstRequest = new CreateLoanRequest
+        var request = new CreateLoanRequest
         {
             LoanDate = today,
             DueDate = today.AddDays(14),
-            ItemId = item.Id,
-            BorrowerId = firstBorrower.Id
+            ItemId = item.Id
         };
 
-        var firstResponse = await _client.PostAsJsonAsync(
+        var firstResponse = await firstBorrowerClient.PostAsJsonAsync(
             "/api/loans",
-            firstRequest);
+            request);
 
         Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
 
-        var secondRequest = new CreateLoanRequest
-        {
-            LoanDate = today,
-            DueDate = today.AddDays(14),
-            ItemId = item.Id,
-            BorrowerId = secondBorrower.Id
-        };
-
-        // Act
-        var secondResponse = await _client.PostAsJsonAsync(
+        var secondResponse = await secondBorrowerClient.PostAsJsonAsync(
             "/api/loans",
-            secondRequest);
+            request);
 
-        // Assert
-        Assert.Equal(
-            HttpStatusCode.Conflict,
-            secondResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
     }
 
     [Fact]
     public async Task ReturnLoan_ShouldReturnOkAndSetReturnDate()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
         var loan = await CreateLoanAsync();
+
+        using var borrowerClient = _factory.CreateClient();
+        await AuthenticateAsBorrowerAsync(borrowerClient, loan.Id);
 
         var returnDate = DateOnly.FromDateTime(DateTime.Today);
 
         var request = new ReturnLoanRequest
         {
-            ReturnDate = DateOnly.FromDateTime(DateTime.Today),
+            ReturnDate = returnDate,
             RowVersion = loan.RowVersion
         };
 
-        // Act
-        var response = await _client.PostAsJsonAsync(
+        var response = await borrowerClient.PostAsJsonAsync(
             $"/api/loans/{loan.Id}/return",
             request);
 
-        // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var returnedLoan = await response.Content
@@ -258,8 +366,7 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
         Assert.True(returnedLoan.IsReturned);
         Assert.Equal(returnDate, returnedLoan.ReturnDate);
 
-        // Verify that the return was persisted.
-        var getResponse = await _client.GetAsync(
+        var getResponse = await borrowerClient.GetAsync(
             $"/api/loans/{loan.Id}");
 
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
@@ -271,16 +378,20 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
         Assert.True(savedLoan.IsReturned);
         Assert.Equal(returnDate, savedLoan.ReturnDate);
         Assert.Equal(8, returnedLoan.RowVersion.Length);
-        Assert.False(loan.RowVersion.SequenceEqual(returnedLoan.RowVersion)); // The RowVersion should have changed after the update.
+
+        Assert.False(
+            loan.RowVersion.SequenceEqual(returnedLoan.RowVersion));
     }
 
     [Fact]
     public async Task ReturnLoan_WhenAlreadyReturned_ShouldReturnConflict()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
         var loan = await CreateLoanAsync();
+
+        using var borrowerClient = _factory.CreateClient();
+        await AuthenticateAsBorrowerAsync(borrowerClient, loan.Id);
 
         var request = new ReturnLoanRequest
         {
@@ -288,69 +399,167 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
             RowVersion = loan.RowVersion
         };
 
-        var firstResponse = await _client.PostAsJsonAsync(
+        var firstResponse = await borrowerClient.PostAsJsonAsync(
             $"/api/loans/{loan.Id}/return",
             request);
 
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
 
-        // Act
-        var secondResponse = await _client.PostAsJsonAsync(
+        var secondResponse = await borrowerClient.PostAsJsonAsync(
             $"/api/loans/{loan.Id}/return",
             request);
 
-        // Assert
-        Assert.Equal(
-            HttpStatusCode.Conflict,
-            secondResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task ReturnLoan_WithoutAuthentication_ShouldReturnUnauthorized()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var loan = await CreateLoanAsync();
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/loans/{loan.Id}/return",
+            new ReturnLoanRequest
+            {
+                ReturnDate = DateOnly.FromDateTime(DateTime.Today),
+                RowVersion = loan.RowVersion
+            });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ReturnLoan_WhenUserIsNotBorrowerOrOwner_ShouldReturnForbidden()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var loan = await CreateLoanAsync();
+
+        using var otherClient = _factory.CreateClient();
+        await AuthenticateAsync(otherClient, UserRole.User);
+
+        var response = await otherClient.PostAsJsonAsync(
+            $"/api/loans/{loan.Id}/return",
+            new ReturnLoanRequest
+            {
+                ReturnDate = DateOnly.FromDateTime(DateTime.Today),
+                RowVersion = loan.RowVersion
+            });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+        // An unauthorized return must not change the loan.
+        using var scope = _factory.Services.CreateScope();
+
+        var context = scope.ServiceProvider
+            .GetRequiredService<BoardGameDbContext>();
+
+        var savedLoan = await context.Loans
+            .AsNoTracking()
+            .FirstAsync(saved => saved.Id == loan.Id);
+
+        Assert.False(savedLoan.IsReturned);
+    }
+
+    [Fact]
+    public async Task ReturnLoan_WhenUserIsOwner_ShouldReturnOk()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var loan = await CreateLoanAsync();
+
+        using var ownerClient = _factory.CreateClient();
+        await AuthenticateAsOwnerAsync(ownerClient, loan.ItemId);
+
+        var response = await ownerClient.PostAsJsonAsync(
+            $"/api/loans/{loan.Id}/return",
+            new ReturnLoanRequest
+            {
+                ReturnDate = DateOnly.FromDateTime(DateTime.Today),
+                RowVersion = loan.RowVersion
+            });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var returnedLoan = await response.Content
+            .ReadFromJsonAsync<LoanResponse>();
+
+        Assert.NotNull(returnedLoan);
+        Assert.True(returnedLoan.IsReturned);
+    }
+
+    [Fact]
+    public async Task ReturnLoan_WhenUserIsAdmin_ShouldReturnOk()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var loan = await CreateLoanAsync();
+
+        using var adminClient = _factory.CreateClient();
+        await AuthenticateAsync(adminClient, UserRole.Admin);
+
+        var response = await adminClient.PostAsJsonAsync(
+            $"/api/loans/{loan.Id}/return",
+            new ReturnLoanRequest
+            {
+                ReturnDate = DateOnly.FromDateTime(DateTime.Today),
+                RowVersion = loan.RowVersion
+            });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var returnedLoan = await response.Content
+            .ReadFromJsonAsync<LoanResponse>();
+
+        Assert.NotNull(returnedLoan);
+        Assert.True(returnedLoan.IsReturned);
     }
 
     [Fact]
     public async Task CreateLoan_WhenRequestedConcurrently_ShouldAllowOnlyOneLoan()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
         var item = await CreateItemAsync();
-        var firstBorrower = await CreateUserAsync();
-        var secondBorrower = await CreateUserAsync();
+
+        using var firstBorrowerClient = _factory.CreateClient();
+        using var secondBorrowerClient = _factory.CreateClient();
+
+        await AuthenticateAsync(firstBorrowerClient, UserRole.User);
+        await AuthenticateAsync(secondBorrowerClient, UserRole.User);
 
         var today = DateOnly.FromDateTime(DateTime.Today);
 
-        var firstRequest = new CreateLoanRequest
+        var request = new CreateLoanRequest
         {
             LoanDate = today,
             DueDate = today.AddDays(14),
-            ItemId = item.Id,
-            BorrowerId = firstBorrower.Id
+            ItemId = item.Id
         };
 
-        var secondRequest = new CreateLoanRequest
-        {
-            LoanDate = today,
-            DueDate = today.AddDays(14),
-            ItemId = item.Id,
-            BorrowerId = secondBorrower.Id
-        };
-
-        // Act
         var requests = new[]
         {
-            _client.PostAsJsonAsync("/api/loans", firstRequest),
-            _client.PostAsJsonAsync("/api/loans", secondRequest)
+            firstBorrowerClient.PostAsJsonAsync("/api/loans", request),
+            secondBorrowerClient.PostAsJsonAsync("/api/loans", request)
         };
 
         var responses = await Task.WhenAll(requests);
 
-        // Assert
-        Assert.Single(responses,
+        Assert.Single(
+            responses,
             response => response.StatusCode == HttpStatusCode.Created);
 
-        Assert.Single(responses,
+        Assert.Single(
+            responses,
             response => response.StatusCode == HttpStatusCode.Conflict);
 
-        // Verify the database state through the API.
-        var getResponse = await _client.GetAsync("/api/loans");
+        // Only administrators can retrieve the complete loan list.
+        using var adminClient = _factory.CreateClient();
+        await AuthenticateAsync(adminClient, UserRole.Admin);
+
+        var getResponse = await adminClient.GetAsync("/api/loans");
 
         getResponse.EnsureSuccessStatusCode();
 
@@ -359,17 +568,20 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
 
         Assert.NotNull(loans);
 
-        Assert.Single(loans,
+        Assert.Single(
+            loans,
             loan => loan.ItemId == item.Id && !loan.IsReturned);
     }
 
     [Fact]
     public async Task ReturnLoan_WithoutRowVersion_ShouldReturnBadRequest()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
         var loan = await CreateLoanAsync();
+
+        using var borrowerClient = _factory.CreateClient();
+        await AuthenticateAsBorrowerAsync(borrowerClient, loan.Id);
 
         var request = new ReturnLoanRequest
         {
@@ -377,16 +589,13 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
             RowVersion = []
         };
 
-        // Act
-        var response = await _client.PostAsJsonAsync(
+        var response = await borrowerClient.PostAsJsonAsync(
             $"/api/loans/{loan.Id}/return",
             request);
 
-        // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        // Verify that the loan is still active.
-        var getResponse = await _client.GetAsync(
+        var getResponse = await borrowerClient.GetAsync(
             $"/api/loans/{loan.Id}");
 
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
@@ -402,15 +611,16 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
     [Fact]
     public async Task ReturnLoan_WithStaleRowVersion_ShouldReturnConflict()
     {
-        // Arrange
         await _factory.InitializeDatabaseAsync();
 
         var loan = await CreateLoanAsync();
 
+        using var borrowerClient = _factory.CreateClient();
+        await AuthenticateAsBorrowerAsync(borrowerClient, loan.Id);
+
         var firstReturnDate = DateOnly.FromDateTime(DateTime.Today);
         var secondReturnDate = firstReturnDate.AddDays(1);
 
-        // Both requests use the original RowVersion.
         var firstRequest = new ReturnLoanRequest
         {
             ReturnDate = firstReturnDate,
@@ -423,23 +633,20 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
             RowVersion = loan.RowVersion
         };
 
-        // Act: Return the loan successfully.
-        var firstResponse = await _client.PostAsJsonAsync(
+        var firstResponse = await borrowerClient.PostAsJsonAsync(
             $"/api/loans/{loan.Id}/return",
             firstRequest);
 
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
 
-        // Attempt another return using the outdated RowVersion.
-        var secondResponse = await _client.PostAsJsonAsync(
+        // The outdated version must not overwrite the first return.
+        var secondResponse = await borrowerClient.PostAsJsonAsync(
             $"/api/loans/{loan.Id}/return",
             secondRequest);
 
-        // Assert
         Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
 
-        // Verify that the original return date was preserved.
-        var getResponse = await _client.GetAsync(
+        var getResponse = await borrowerClient.GetAsync(
             $"/api/loans/{loan.Id}");
 
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
@@ -452,22 +659,310 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
         Assert.Equal(firstReturnDate, savedLoan.ReturnDate);
     }
 
-    // Creates a complete loan through the API.
-    private async Task<LoanResponse> CreateLoanAsync()
+    [Fact]
+    public async Task CreateLoan_WhenItemIsArchived_ShouldReturnConflict()
     {
+        await _factory.InitializeDatabaseAsync();
+
         var item = await CreateItemAsync();
-        var borrower = await CreateUserAsync();
+
+        using var ownerClient = _factory.CreateClient();
+        await AuthenticateAsExistingUserAsync(ownerClient, item.OwnerId);
+
+        var archiveResponse = await ownerClient.PutAsync(
+            $"/api/items/{item.Id}/archive",
+            null);
+
+        Assert.Equal(HttpStatusCode.NoContent, archiveResponse.StatusCode);
+
+        using var borrowerClient = _factory.CreateClient();
+        await AuthenticateAsync(borrowerClient, UserRole.User);
 
         var today = DateOnly.FromDateTime(DateTime.Today);
 
-        var response = await _client.PostAsJsonAsync(
+        var request = new CreateLoanRequest
+        {
+            LoanDate = today,
+            DueDate = today.AddDays(14),
+            ItemId = item.Id
+        };
+
+        var response = await borrowerClient.PostAsJsonAsync(
+            "/api/loans",
+            request);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+
+        var context = scope.ServiceProvider
+            .GetRequiredService<BoardGameDbContext>();
+
+        Assert.False(
+            await context.Loans.AnyAsync(
+                loan => loan.ItemId == item.Id));
+    }
+
+    [Fact]
+    public async Task ArchiveItem_WhenItemHasActiveLoan_ShouldReturnConflict()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var item = await CreateItemAsync();
+
+        using var borrowerClient = _factory.CreateClient();
+        await AuthenticateAsync(borrowerClient, UserRole.User);
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+
+        var loanResponse = await borrowerClient.PostAsJsonAsync(
             "/api/loans",
             new CreateLoanRequest
             {
                 LoanDate = today,
                 DueDate = today.AddDays(14),
-                ItemId = item.Id,
-                BorrowerId = borrower.Id
+                ItemId = item.Id
+            });
+
+        Assert.Equal(HttpStatusCode.Created, loanResponse.StatusCode);
+
+        var loan = await loanResponse.Content
+            .ReadFromJsonAsync<LoanResponse>();
+
+        Assert.NotNull(loan);
+
+        using var ownerClient = _factory.CreateClient();
+        await AuthenticateAsExistingUserAsync(ownerClient, item.OwnerId);
+
+        var archiveResponse = await ownerClient.PutAsync(
+            $"/api/items/{item.Id}/archive",
+            null);
+
+        Assert.Equal(HttpStatusCode.Conflict, archiveResponse.StatusCode);
+
+        var collection = await ownerClient.GetFromJsonAsync<
+            List<CollectionItemResponse>>("/api/items/my-collection");
+
+        Assert.NotNull(collection);
+
+        var savedItem = Assert.Single(
+            collection,
+            entry => entry.ItemId == item.Id);
+
+        Assert.False(savedItem.IsArchived);
+
+        // The borrower can still view the unchanged active loan.
+        var getLoanResponse = await borrowerClient.GetAsync(
+            $"/api/loans/{loan.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, getLoanResponse.StatusCode);
+
+        var savedLoan = await getLoanResponse.Content
+            .ReadFromJsonAsync<LoanResponse>();
+
+        Assert.NotNull(savedLoan);
+        Assert.False(savedLoan.IsReturned);
+        Assert.Null(savedLoan.ReturnDate);
+    }
+
+
+    [Fact]
+    public async Task GetMyLoans_WithoutAuthentication_ShouldReturnUnauthorized()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var response = await _client.GetAsync("/api/loans/my-loans");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetMyLendings_WithoutAuthentication_ShouldReturnUnauthorized()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var response = await _client.GetAsync("/api/loans/my-lendings");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetMyLoans_ShouldReturnOnlyAuthenticatedBorrowersLoans()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var ownLoan = await CreateLoanAsync();
+        var otherLoan = await CreateLoanAsync();
+
+        using var borrowerClient = _factory.CreateClient();
+        await AuthenticateAsBorrowerAsync(borrowerClient, ownLoan.Id);
+
+        var response = await borrowerClient.GetAsync("/api/loans/my-loans");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var loans = await response.Content
+            .ReadFromJsonAsync<List<LoanResponse>>();
+
+        Assert.NotNull(loans);
+        Assert.Contains(loans, loan => loan.Id == ownLoan.Id);
+        Assert.DoesNotContain(loans, loan => loan.Id == otherLoan.Id);
+
+        // No loans belonging to another borrower may be exposed.
+        Assert.All(
+            loans,
+            loan => Assert.Equal(ownLoan.BorrowerId, loan.BorrowerId));
+    }
+
+
+    [Fact]
+    public async Task GetMyLendings_ShouldReturnOnlyOwnedItemsLoans()
+    {
+        // Arrange
+        await _factory.InitializeDatabaseAsync();
+
+        var ownLoan = await CreateLoanAsync();
+        var otherLoan = await CreateLoanAsync();
+
+        using var ownerClient = _factory.CreateClient();
+        await AuthenticateAsOwnerAsync(ownerClient, ownLoan.ItemId);
+
+        // Find the owner of the physical copy.
+        using var scope = _factory.Services.CreateScope();
+
+        var context = scope.ServiceProvider
+            .GetRequiredService<BoardGameDbContext>();
+
+        var ownerId = await context.Items
+            .AsNoTracking()
+            .Where(item => item.Id == ownLoan.ItemId)
+            .Select(item => item.OwnerId)
+            .SingleAsync();
+
+        // Act
+        var response = await ownerClient.GetAsync(
+            "/api/loans/my-lendings");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var loans = await response.Content
+            .ReadFromJsonAsync<List<LoanResponse>>();
+
+        Assert.NotNull(loans);
+
+        // The owner's loan must be included.
+        Assert.Contains(loans, loan => loan.Id == ownLoan.Id);
+
+        // Another owner's loan must not be included.
+        Assert.DoesNotContain(loans, loan => loan.Id == otherLoan.Id);
+
+        // Every returned loan must concern an item owned by this user.
+        var returnedItemIds = loans
+            .Select(loan => loan.ItemId)
+            .Distinct()
+            .ToList();
+
+        var ownedItemIds = await context.Items
+            .AsNoTracking()
+            .Where(item =>
+                item.OwnerId == ownerId &&
+                returnedItemIds.Contains(item.Id))
+            .Select(item => item.Id)
+            .ToListAsync();
+
+        Assert.Equal(
+            returnedItemIds.Count,
+            ownedItemIds.Count);
+    }
+
+
+    [Fact]
+    public async Task GetMyLoans_ShouldIncludeReturnedLoans()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var loan = await CreateLoanAsync();
+
+        using var borrowerClient = _factory.CreateClient();
+        await AuthenticateAsBorrowerAsync(borrowerClient, loan.Id);
+
+        var returnResponse = await borrowerClient.PostAsJsonAsync(
+            $"/api/loans/{loan.Id}/return",
+            new ReturnLoanRequest
+            {
+                ReturnDate = DateOnly.FromDateTime(DateTime.Today),
+                RowVersion = loan.RowVersion
+            });
+
+        Assert.Equal(HttpStatusCode.OK, returnResponse.StatusCode);
+
+        var loans = await borrowerClient.GetFromJsonAsync<List<LoanResponse>>(
+            "/api/loans/my-loans");
+
+        Assert.NotNull(loans);
+
+        var returnedLoan = Assert.Single(
+            loans,
+            entry => entry.Id == loan.Id);
+
+        Assert.True(returnedLoan.IsReturned);
+        Assert.NotNull(returnedLoan.ReturnDate);
+    }
+
+    [Fact]
+    public async Task GetMyLendings_ShouldIncludeReturnedLoans()
+    {
+        await _factory.InitializeDatabaseAsync();
+
+        var loan = await CreateLoanAsync();
+
+        using var ownerClient = _factory.CreateClient();
+        await AuthenticateAsOwnerAsync(ownerClient, loan.ItemId);
+
+        var returnResponse = await ownerClient.PostAsJsonAsync(
+            $"/api/loans/{loan.Id}/return",
+            new ReturnLoanRequest
+            {
+                ReturnDate = DateOnly.FromDateTime(DateTime.Today),
+                RowVersion = loan.RowVersion
+            });
+
+        Assert.Equal(HttpStatusCode.OK, returnResponse.StatusCode);
+
+        var loans = await ownerClient.GetFromJsonAsync<List<LoanResponse>>(
+            "/api/loans/my-lendings");
+
+        Assert.NotNull(loans);
+
+        var returnedLoan = Assert.Single(
+            loans,
+            entry => entry.Id == loan.Id);
+
+        Assert.True(returnedLoan.IsReturned);
+        Assert.NotNull(returnedLoan.ReturnDate);
+    }
+
+
+    // Creates a complete loan through the API.
+    private async Task<LoanResponse> CreateLoanAsync()
+    {
+        var item = await CreateItemAsync();
+
+        using var borrowerClient = _factory.CreateClient();
+        var borrowerId = await AuthenticateAsync(
+            borrowerClient,
+            UserRole.User);
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+
+        var response = await borrowerClient.PostAsJsonAsync(
+            "/api/loans",
+            new CreateLoanRequest
+            {
+                LoanDate = today,
+                DueDate = today.AddDays(14),
+                ItemId = item.Id
             });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -476,23 +971,28 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
             .ReadFromJsonAsync<LoanResponse>();
 
         Assert.NotNull(loan);
+        Assert.Equal(borrowerId, loan.BorrowerId);
 
         return loan;
     }
 
-    // Creates an item with its required board game and owner.
+    // Creates an item with its required board game and authenticated owner.
     private async Task<ItemResponse> CreateItemAsync(
         int minimumAge = 12)
     {
         var boardGame = await CreateBoardGameAsync(minimumAge);
-        var owner = await CreateUserAsync();
 
-        var response = await _client.PostAsJsonAsync(
+        using var ownerClient = _factory.CreateClient();
+
+        var ownerId = await AuthenticateAsync(
+            ownerClient,
+            UserRole.User);
+
+        var response = await ownerClient.PostAsJsonAsync(
             "/api/items",
             new CreateItemRequest
             {
-                BoardGameId = boardGame.Id,
-                OwnerId = owner.Id
+                BoardGameId = boardGame.Id
             });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -501,18 +1001,18 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
             .ReadFromJsonAsync<ItemResponse>();
 
         Assert.NotNull(item);
+        Assert.Equal(ownerId, item.OwnerId);
 
         return item;
     }
 
-    // Create board game test data using a separate authenticated administrator client.
-    // The main test client remains unchanged for the loan API assertions.
+    // Creates board game test data using an administrator client.
     private async Task<BoardGameResponse> CreateBoardGameAsync(
         int minimumAge)
     {
         using var adminClient = _factory.CreateClient();
 
-        await AuthenticateAsAdminAsync(adminClient);
+        await AuthenticateAsync(adminClient, UserRole.Admin);
 
         var request = new CreateBoardGameRequest
         {
@@ -542,8 +1042,11 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
         return boardGame;
     }
 
-    // Create an administrator and authenticate the supplied test client.
-    private async Task AuthenticateAsAdminAsync(HttpClient client)
+    // Creates a test user with the specified role and authenticates the client.
+    private async Task<Guid> AuthenticateAsync(
+        HttpClient client,
+        UserRole role,
+        DateOnly? dateOfBirth = null)
     {
         using var scope = _factory.Services.CreateScope();
 
@@ -553,29 +1056,31 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
         var passwordHasher = scope.ServiceProvider
             .GetRequiredService<IPasswordHasher<User>>();
 
-        var username = $"loan-admin-{Guid.NewGuid():N}";
+        var username =
+            $"loan-{role.ToString().ToLowerInvariant()}-{Guid.NewGuid():N}";
+
         const string password = "Test123!";
 
-        var admin = new User(
+        var user = new User(
             username: username,
-            name: new Name("Loan", "Admin"),
+            name: new Name("Loan", "Tester"),
             email: new Email($"{username}@example.com"),
-            dateOfBirth: new DateOnly(2000, 1, 1),
+            dateOfBirth: dateOfBirth ?? new DateOnly(1990, 1, 1),
             address: new Address(
                 "Test Street",
-                "1",
+                "10",
                 "5000",
                 "Odense",
                 "Denmark"));
 
         var passwordHash = passwordHasher.HashPassword(
-            admin,
+            user,
             password);
 
-        admin.SetPasswordHash(passwordHash);
-        admin.SetRole(UserRole.Admin);
+        user.SetPasswordHash(passwordHash);
+        user.SetRole(role);
 
-        context.Users.Add(admin);
+        context.Users.Add(user);
         await context.SaveChangesAsync();
 
         var loginResponse = await client.PostAsJsonAsync(
@@ -598,51 +1103,82 @@ public class LoansApiTests : IClassFixture<BoardGameApiFactory>
             new AuthenticationHeaderValue(
                 "Bearer",
                 loginResult.Token);
+
+        return user.Id;
     }
 
-    private async Task<UserResponse> CreateUserAsync(
-        DateOnly? dateOfBirth = null)
+    // Authenticates as a previously created test user.
+    private async Task AuthenticateAsExistingUserAsync(
+        HttpClient client,
+        Guid userId)
     {
-        var uniqueId = Guid.NewGuid().ToString("N");
+        using var scope = _factory.Services.CreateScope();
 
-        var request = new CreateUserRequest
-        {
-            Username = $"loan-user-{uniqueId}",
+        var context = scope.ServiceProvider
+            .GetRequiredService<BoardGameDbContext>();
 
-            Name = new NameDto
+        var user = await context.Users
+            .FirstAsync(user => user.Id == userId);
+
+        const string password = "Test123!";
+
+        var loginResponse = await client.PostAsJsonAsync(
+            "/api/auth/login",
+            new LoginRequest
             {
-                FirstName = "Loan",
-                LastName = "Tester"
-            },
+                Username = user.Username,
+                Password = password
+            });
 
-            Email = new EmailDto
-            {
-                Value = $"loan-{uniqueId}@example.com"
-            },
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
 
-            DateOfBirth = dateOfBirth ?? new DateOnly(1990, 1, 1),
+        var loginResult = await loginResponse.Content
+            .ReadFromJsonAsync<LoginResponse>();
 
-            Address = new AddressDto
-            {
-                Street = "Test Street",
-                HouseNumber = "10",
-                PostalCode = "5000",
-                City = "Odense",
-                Country = "Denmark"
-            }
-        };
+        Assert.NotNull(loginResult);
+        Assert.False(string.IsNullOrWhiteSpace(loginResult.Token));
 
-        var response = await _client.PostAsJsonAsync(
-            "/api/users",
-            request);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue(
+                "Bearer",
+                loginResult.Token);
+    }
 
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    // Authenticates as the borrower associated with a specific loan.
+    private async Task AuthenticateAsBorrowerAsync(
+        HttpClient client,
+        Guid loanId)
+    {
+        using var scope = _factory.Services.CreateScope();
 
-        var user = await response.Content
-            .ReadFromJsonAsync<UserResponse>();
+        var context = scope.ServiceProvider
+            .GetRequiredService<BoardGameDbContext>();
 
-        Assert.NotNull(user);
+        var loan = await context.Loans
+            .AsNoTracking()
+            .FirstAsync(loan => loan.Id == loanId);
 
-        return user;
+        await AuthenticateAsExistingUserAsync(
+            client,
+            loan.BorrowerId);
+    }
+
+    // Authenticates as the owner of a physical board game copy.
+    private async Task AuthenticateAsOwnerAsync(
+        HttpClient client,
+        Guid itemId)
+    {
+        using var scope = _factory.Services.CreateScope();
+
+        var context = scope.ServiceProvider
+            .GetRequiredService<BoardGameDbContext>();
+
+        var item = await context.Items
+            .AsNoTracking()
+            .FirstAsync(item => item.Id == itemId);
+
+        await AuthenticateAsExistingUserAsync(
+            client,
+            item.OwnerId);
     }
 }

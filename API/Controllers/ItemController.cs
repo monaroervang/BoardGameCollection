@@ -1,4 +1,7 @@
-﻿using Domain.Models;
+﻿
+using System.Security.Claims;
+using Domain.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Persistence.Repositories;
@@ -59,13 +62,23 @@ public class ItemController : ControllerBase
         return Ok(item);
     }
 
+    [Authorize]
     [HttpPost]
     [ProducesResponseType(typeof(ItemResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ItemResponse>> CreateItem(
         CreateItemRequest request)
     {
+        // Get the authenticated user's ID from the validated JWT.
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId is null)
+        {
+            return Unauthorized();
+        }
+
         // Verify that the board game exists.
         var boardGameExists = await _context.BoardGames
             .AnyAsync(boardGame => boardGame.Id == request.BoardGameId);
@@ -80,23 +93,19 @@ public class ItemController : ControllerBase
             });
         }
 
-        // Verify that the owner exists.
+        // Verify that the authenticated user still exists.
         var ownerExists = await _context.Users
-            .AnyAsync(user => user.Id == request.OwnerId);
+            .AnyAsync(user => user.Id == ownerId.Value);
 
         if (!ownerExists)
         {
-            return NotFound(new ProblemDetails
-            {
-                Status = StatusCodes.Status404NotFound,
-                Title = "Owner not found",
-                Detail = "The specified owner does not exist."
-            });
+            return Unauthorized();
         }
 
+        // The owner is determined by the authenticated user, not the request.
         var item = new Item(
             request.BoardGameId,
-            request.OwnerId);
+            ownerId.Value);
 
         _context.Items.Add(item);
         await _context.SaveChangesAsync();
@@ -114,17 +123,34 @@ public class ItemController : ControllerBase
             response);
     }
 
+    [Authorize]
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> DeleteItem(Guid id)
     {
+        // Get the authenticated user's ID from the validated JWT.
+        var currentUserId = GetCurrentUserId();
+
+        if (currentUserId is null)
+        {
+            return Unauthorized();
+        }
+
         var item = await _context.Items.FindAsync(id);
 
         if (item is null)
         {
             return NotFound();
+        }
+
+        // Only the owner may delete their physical copy.
+        if (item.OwnerId != currentUserId.Value)
+        {
+            return Forbid();
         }
 
         // Keep loan history intact.
@@ -146,33 +172,148 @@ public class ItemController : ControllerBase
 
         return NoContent();
     }
-    // Get all physical board game copies owned by a specific user.
-    [HttpGet("owner/{ownerId:guid}")]
-    [ProducesResponseType(
-        typeof(List<CollectionItemResponse>),
-        StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<List<CollectionItemResponse>>> GetItemsByOwner(
-        Guid ownerId)
-    {
-        // Verify that the owner exists.
-        var ownerExists = await _context.Users
-            .AnyAsync(user => user.Id == ownerId);
 
-        if (!ownerExists)
+    // Archive a physical copy without deleting its loan history.
+    [Authorize]
+    [HttpPut("{id:guid}/archive")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> ArchiveItem(Guid id)
+    {
+        var currentUserId = GetCurrentUserId();
+
+        if (currentUserId is null)
         {
-            return NotFound(new ProblemDetails
+            return Unauthorized();
+        }
+
+        var item = await _context.Items.FindAsync(id);
+
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        // Only the owner may archive the physical copy.
+        if (item.OwnerId != currentUserId.Value)
+        {
+            return Forbid();
+        }
+
+        if (item.IsArchived)
+        {
+            return Conflict(new ProblemDetails
             {
-                Status = StatusCodes.Status404NotFound,
-                Title = "Owner not found",
-                Detail = "The specified owner does not exist."
+                Status = StatusCodes.Status409Conflict,
+                Title = "Item already archived",
+                Detail = "The item is already archived."
             });
         }
 
-        // Get the physical items together with their board game information.
+        // An item with an active loan cannot be archived.
+        var hasActiveLoan = await _context.Loans
+            .AnyAsync(loan =>
+                loan.ItemId == id &&
+                loan.ReturnDate == null);
+
+        if (hasActiveLoan)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Item is currently on loan",
+                Detail = "Return the item before archiving it."
+            });
+        }
+
+        item.Archive();
+
+        await _context.SaveChangesAsync();
+
+        return NoContent();
+    }
+
+    // Reactivate an archived physical copy.
+    [Authorize]
+    [HttpPut("{id:guid}/reactivate")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> ReactivateItem(Guid id)
+    {
+        var currentUserId = GetCurrentUserId();
+
+        if (currentUserId is null)
+        {
+            return Unauthorized();
+        }
+
+        var item = await _context.Items.FindAsync(id);
+
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        // Only the owner may reactivate the physical copy.
+        if (item.OwnerId != currentUserId.Value)
+        {
+            return Forbid();
+        }
+
+        if (!item.IsArchived)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Item already active",
+                Detail = "The item is already active."
+            });
+        }
+
+        item.Reactivate();
+
+        await _context.SaveChangesAsync();
+
+        return NoContent();
+    }
+
+    // Get the authenticated user's physical board game collection.
+    [Authorize]
+    [HttpGet("my-collection")]
+    [ProducesResponseType(
+        typeof(List<CollectionItemResponse>),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<List<CollectionItemResponse>>>
+        GetMyCollection()
+    {
+        // The user ID comes from the validated JWT, not a route parameter.
+        var currentUserId = GetCurrentUserId();
+
+        if (currentUserId is null)
+        {
+            return Unauthorized();
+        }
+
+        // Verify that the authenticated user still exists.
+        var userExists = await _context.Users
+            .AnyAsync(user => user.Id == currentUserId.Value);
+
+        if (!userExists)
+        {
+            return Unauthorized();
+        }
+
+        // Get only the physical copies owned by the authenticated user.
         var items = await _context.Items
             .AsNoTracking()
-            .Where(item => item.OwnerId == ownerId)
+            .Where(item => item.OwnerId == currentUserId.Value)
             .Join(
                 _context.BoardGames,
                 item => item.BoardGameId,
@@ -187,13 +328,17 @@ public class ItemController : ControllerBase
                     MinPlayers = boardGame.MinPlayers,
                     MaxPlayers = boardGame.MaxPlayers,
                     PlayingTimeMinutes = boardGame.PlayingTimeMinutes,
-                    MinimumAge = boardGame.MinimumAge
+                    MinimumAge = boardGame.MinimumAge,
+                    IsArchived = item.IsArchived
                 })
             .OrderBy(item => item.Title)
+            .ThenBy(item => item.ItemId)
             .ToListAsync();
 
         return Ok(items);
     }
+
+
     // Get all physical copies of a specific board game.
     [HttpGet("boardgame/{boardGameId:guid}")]
     [ProducesResponseType(
@@ -231,14 +376,33 @@ public class ItemController : ControllerBase
                     OwnerId = user.Id,
                     OwnerUsername = user.Username,
 
-                    // An item is available when it has no active loan.
-                    IsAvailable = !_context.Loans.Any(loan =>
-                        loan.ItemId == item.Id &&
-                        loan.ReturnDate == null)
+                    // Indicate whether the physical copy is archived.
+                    IsArchived = item.IsArchived,
+
+                    // Archived items and items with active loans are unavailable.
+                    IsAvailable = !item.IsArchived &&
+                        !_context.Loans.Any(loan =>
+                            loan.ItemId == item.Id &&
+                            loan.ReturnDate == null)
                 })
             .OrderBy(item => item.OwnerUsername)
             .ToListAsync();
 
         return Ok(items);
+    }
+
+
+    // Read the user ID from the validated authentication claims.
+    private Guid? GetCurrentUserId()
+    {
+        var userIdClaim = User.FindFirstValue(
+            ClaimTypes.NameIdentifier);
+
+        if (!Guid.TryParse(userIdClaim, out var userId))
+        {
+            return null;
+        }
+
+        return userId;
     }
 }

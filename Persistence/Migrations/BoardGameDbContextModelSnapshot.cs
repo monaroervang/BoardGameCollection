@@ -85,6 +85,11 @@ namespace Persistence.Migrations
                     b.Property<Guid>("BoardGameId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("IsArchived")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<Guid>("OwnerId")
                         .HasColumnType("uniqueidentifier");
 

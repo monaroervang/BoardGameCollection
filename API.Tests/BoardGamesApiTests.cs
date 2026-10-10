@@ -574,6 +574,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
         Assert.Contains(games, game => game.Id == matchingGame.Id);
     }
 
+
     [Fact]
     public async Task GetBoardGames_WithWhitespaceSearch_ShouldReturnAllGames()
     {
@@ -584,25 +585,46 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
         var firstGame = await CreateBoardGameAsync();
         var secondGame = await CreateBoardGameAsync();
 
-        // Act
-        var response = await _client.GetAsync(
-            "/api/boardgames?search=%20%20%20&page=1&pageSize=100");
+        const int pageSize = 100;
 
-        // Assert
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        // Compare whitespace search with an unfiltered request.
+        var whitespaceResponse = await _client.GetAsync(
+            $"/api/boardgames?search=%20%20%20&page=1&pageSize={pageSize}");
 
-        var result = await response.Content
+        var unfilteredResponse = await _client.GetAsync(
+            $"/api/boardgames?page=1&pageSize={pageSize}");
+
+        Assert.Equal(HttpStatusCode.OK, whitespaceResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, unfilteredResponse.StatusCode);
+
+        var whitespaceResult = await whitespaceResponse.Content
             .ReadFromJsonAsync<PagedResponse<BoardGameResponse>>();
 
-        Assert.NotNull(result);
+        var unfilteredResult = await unfilteredResponse.Content
+            .ReadFromJsonAsync<PagedResponse<BoardGameResponse>>();
 
-        var games = result.Items;
+        Assert.NotNull(whitespaceResult);
+        Assert.NotNull(unfilteredResult);
 
-        Assert.NotNull(games);
+        // Whitespace must not change the total number of matching games.
+        Assert.Equal(
+            unfilteredResult.TotalCount,
+            whitespaceResult.TotalCount);
 
-        // Other test data may exist, so verify our two games are present.
-        Assert.Contains(games, game => game.Id == firstGame.Id);
-        Assert.Contains(games, game => game.Id == secondGame.Id);
+        // Whitespace must not change the first page of results.
+        Assert.Equal(
+            unfilteredResult.Items.Select(game => game.Id),
+            whitespaceResult.Items.Select(game => game.Id));
+
+        // Verify that both newly created games exist in the database.
+        var firstGameResponse = await _client.GetAsync(
+            $"/api/boardgames/{firstGame.Id}");
+
+        var secondGameResponse = await _client.GetAsync(
+            $"/api/boardgames/{secondGame.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, firstGameResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, secondGameResponse.StatusCode);
     }
 
     [Fact]
@@ -646,6 +668,7 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
         Assert.Equal(uniqueGenre, result.Items[0].Genre);
     }
 
+
     [Fact]
     public async Task GetBoardGames_WithPlayersFilter_ShouldReturnSupportedGames()
     {
@@ -655,30 +678,54 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
 
         var matchingGame = await CreateBoardGameAsync();
 
-        // Act
-        // The existing helper creates games for 2-4 players.
-        var response = await _client.GetAsync(
-            "/api/boardgames?players=4&page=1&pageSize=100");
+        const int pageSize = 100;
+        var page = 1;
+        var foundMatchingGame = false;
 
-        // Assert
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        var result = await response.Content
-            .ReadFromJsonAsync<PagedResponse<BoardGameResponse>>();
-
-        Assert.NotNull(result);
-
-        var games = result.Items;
-
-        Assert.NotNull(games);
-        Assert.Contains(games, game => game.Id == matchingGame.Id);
-
-        Assert.All(games, game =>
+        // Act and assert
+        while (true)
         {
-            Assert.True(game.MinPlayers <= 4);
-            Assert.True(game.MaxPlayers >= 4);
-        });
+            var response = await _client.GetAsync(
+                $"/api/boardgames?players=4&page={page}&pageSize={pageSize}");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var result = await response.Content
+                .ReadFromJsonAsync<PagedResponse<BoardGameResponse>>();
+
+            Assert.NotNull(result);
+            Assert.NotNull(result.Items);
+
+            var games = result.Items;
+
+            // Every returned game must support four players.
+            Assert.All(games, game =>
+            {
+                Assert.True(game.MinPlayers <= 4);
+                Assert.True(game.MaxPlayers >= 4);
+            });
+
+            if (games.Any(game => game.Id == matchingGame.Id))
+            {
+                foundMatchingGame = true;
+            }
+
+            // Stop after the final page.
+            if (games.Count < pageSize)
+            {
+                break;
+            }
+
+            page++;
+        }
+
+        // The game created by this test must be included in the filtered results.
+        Assert.True(
+            foundMatchingGame,
+            "The newly created game was not found in the players=4 results.");
     }
+
+
 
     [Fact]
     public async Task GetBoardGames_WithAgeFilter_ShouldReturnSuitableGames()
@@ -686,22 +733,37 @@ public class BoardGamesApiTests : IClassFixture<BoardGameApiFactory>
         // Arrange
         await _factory.InitializeDatabaseAsync();
 
-        // Act
-        var response = await _client.GetAsync(
-            "/api/boardgames?age=12&page=1&pageSize=100");
+        const int pageSize = 100;
+        var page = 1;
 
-        // Assert
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        // Act and assert
+        while (true)
+        {
+            var response = await _client.GetAsync(
+                $"/api/boardgames?age=12&page={page}&pageSize={pageSize}");
 
-        var result = await response.Content
-            .ReadFromJsonAsync<PagedResponse<BoardGameResponse>>();
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        Assert.NotNull(result);
+            var result = await response.Content
+                .ReadFromJsonAsync<PagedResponse<BoardGameResponse>>();
 
-        // Every returned game must be suitable for a 12-year-old.
-        Assert.All(result.Items, game =>
-            Assert.True(game.MinimumAge <= 12));
+            Assert.NotNull(result);
+            Assert.NotNull(result.Items);
+
+            // Every returned game must be suitable for a 12-year-old.
+            Assert.All(result.Items, game =>
+                Assert.True(game.MinimumAge <= 12));
+
+            // Stop after the final page.
+            if (result.Items.Count < pageSize)
+            {
+                break;
+            }
+
+            page++;
+        }
     }
+
 
     [Fact]
     public async Task GetBoardGames_WithCombinedFilters_ShouldReturnMatchingGames()

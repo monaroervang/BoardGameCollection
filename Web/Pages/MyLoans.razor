@@ -1,0 +1,195 @@
+﻿@page "/my-loans"
+@attribute [Authorize]
+
+@using System.Net
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Shared.DTOs.Loans.Responses
+
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<PageTitle>Mine lån</PageTitle>
+
+<h1>Mine lån</h1>
+
+<p class="text-muted">
+    Her kan du se dine aktive lån og din lånehistorik.
+</p>
+
+@if (isLoading)
+{
+    <p>Indlæser dine lån...</p>
+}
+else if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger" role="alert">
+        @errorMessage
+    </div>
+}
+else if (loans.Count == 0)
+{
+    <div class="alert alert-info">
+        Du har endnu ikke lånt nogen brætspil.
+    </div>
+
+    <a class="btn btn-primary" href="/boardgames">
+        Find brætspil
+    </a>
+}
+else
+{
+    <p>
+        Du har @activeLoans.Count aktive lån og
+        @returnedLoans.Count afsluttede lån.
+    </p>
+
+    <h2 class="h4 mt-4">Aktive lån</h2>
+
+    @if (activeLoans.Count == 0)
+    {
+        <div class="alert alert-info">
+            Du har ingen aktive lån.
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-striped align-middle">
+                <thead>
+                    <tr>
+                        <th>Spilkopi</th>
+                        <th>Lånedato</th>
+                        <th>Afleveringsfrist</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var loan in activeLoans)
+                    {
+                        <tr @key="loan.Id">
+                            <td>
+                                @loan.BoardGameTitle
+                            </td>
+                            <td>@loan.LoanDate.ToString("dd-MM-yyyy")</td>
+                            <td>@loan.DueDate.ToString("dd-MM-yyyy")</td>
+                            <td>
+                                @if (loan.IsOverdue)
+                                {
+                                    <span class="badge bg-danger">
+                                        Overskredet
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-success">
+                                        Aktivt lån
+                                    </span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <h2 class="h4 mt-5">Afsluttede lån</h2>
+
+    @if (returnedLoans.Count == 0)
+    {
+        <p class="text-muted">
+            Du har ingen afsluttede lån endnu.
+        </p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-striped align-middle">
+                <thead>
+                    <tr>
+                        <th>Spilkopi</th>
+                        <th>Lånedato</th>
+                        <th>Afleveret</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var loan in returnedLoans)
+                    {
+                        <tr @key="loan.Id">
+                            <td>
+                                @loan.BoardGameTitle
+                            </td>
+                            <td>@loan.LoanDate.ToString("dd-MM-yyyy")</td>
+                            <td>
+                                @loan.ReturnDate?.ToString("dd-MM-yyyy")
+                            </td>
+                            <td>
+                                <span class="badge bg-secondary">
+                                    Afsluttet
+                                </span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <a class="btn btn-primary mt-3" href="/boardgames">
+        Find flere brætspil
+    </a>
+}
+
+@code {
+    // Contains loans where the authenticated user is the borrower.
+    private List<LoanResponse> loans = [];
+
+    private List<LoanResponse> activeLoans =>
+        loans.Where(loan => !loan.IsReturned).ToList();
+
+    private List<LoanResponse> returnedLoans =>
+        loans.Where(loan => loan.IsReturned).ToList();
+
+    private bool isLoading = true;
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadLoansAsync();
+    }
+
+    // Retrieve only the authenticated user's loans.
+    private async Task LoadLoansAsync()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        try
+        {
+            var response = await Http.GetAsync(
+                "api/loans/my-loans");
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                Navigation.NavigateTo("/login");
+                return;
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            loans = await response.Content
+                .ReadFromJsonAsync<List<LoanResponse>>() ?? [];
+        }
+        catch (HttpRequestException)
+        {
+            errorMessage =
+                "Dine lån kunne ikke hentes fra API'et.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

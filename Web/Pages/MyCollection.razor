@@ -1,0 +1,379 @@
+﻿@page "/my-collection"
+@attribute [Authorize]
+
+@using System.Net
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Shared.DTOs.Items.Responses
+
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<PageTitle>Min samling</PageTitle>
+
+<h1>Min samling</h1>
+
+<p class="text-muted">
+    Her kan du se og administrere dine fysiske brætspil.
+</p>
+
+@if (isLoading)
+{
+    <p>Indlæser din samling...</p>
+}
+else if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger" role="alert">
+        @errorMessage
+    </div>
+}
+else if (items.Count == 0)
+{
+    <div class="alert alert-info">
+        Du har endnu ikke tilføjet nogen brætspil til din samling.
+    </div>
+
+    <a class="btn btn-primary" href="/boardgames">
+        Find brætspil
+    </a>
+}
+else
+{
+    <p>
+        Du har @activeItems.Count aktive spil og
+        @archivedItems.Count arkiverede spil i din samling.
+    </p>
+
+    <h2 class="h4 mt-4">Aktive spil</h2>
+
+    @if (activeItems.Count == 0)
+    {
+        <div class="alert alert-info">
+            Du har ingen aktive spil i din samling.
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-striped align-middle">
+                <thead>
+                    <tr>
+                        <th>Brætspil</th>
+                        <th>Genre</th>
+                        <th>Spillere</th>
+                        <th>Spilletid</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in activeItems)
+                    {
+                        <tr @key="item.ItemId">
+                            <td>
+                                <a href="@($"/boardgames/{item.BoardGameId}")">
+                                    @item.Title
+                                </a>
+                            </td>
+
+                            <td>@item.Genre</td>
+
+                            <td>
+                                @item.MinPlayers-@item.MaxPlayers
+                            </td>
+
+                            <td>
+                                @item.PlayingTimeMinutes min.
+                            </td>
+
+                            <td class="text-end">
+                                <button class="btn btn-outline-secondary btn-sm"
+                                        disabled="@(processingItemId is not null)"
+                                        @onclick="() => ArchiveItemAsync(item.ItemId)">
+                                    @(processingItemId == item.ItemId
+                                        ? "Arkiverer..."
+                                        : "Arkivér")
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <h2 class="h4 mt-5">Arkiverede spil</h2>
+
+    <p class="text-muted">
+        Arkiverede spil kan ikke lånes, men bliver gemt
+        sammen med deres udlånshistorik.
+    </p>
+
+    @if (archivedItems.Count == 0)
+    {
+        <p class="text-muted">
+            Du har ingen arkiverede spil.
+        </p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-striped align-middle">
+                <thead>
+                    <tr>
+                        <th>Brætspil</th>
+                        <th>Genre</th>
+                        <th>Spillere</th>
+                        <th>Spilletid</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in archivedItems)
+                    {
+                        <tr @key="item.ItemId"
+                            class="text-muted"
+                            style="opacity: 0.6;">
+                            <td>
+                                <span class="text-decoration-line-through">
+                                    @item.Title
+                                </span>
+                                <span class="badge bg-secondary ms-2">
+                                    Arkiveret
+                                </span>
+                            </td>
+
+                            <td>@item.Genre</td>
+
+                            <td>
+                                @item.MinPlayers-@item.MaxPlayers
+                            </td>
+
+                            <td>
+                                @item.PlayingTimeMinutes min.
+                            </td>
+
+                            <td class="text-end">
+                                <button class="btn btn-outline-secondary btn-sm"
+                                        disabled="@(processingItemId is not null)"
+                                        @onclick="() => ReactivateItemAsync(item.ItemId)">
+                                    @(processingItemId == item.ItemId
+                                        ? "Genaktiverer..."
+                                        : "Genaktivér")
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <a class="btn btn-primary mt-3" href="/boardgames">
+        Tilføj flere spil
+    </a>
+}
+
+@if (!string.IsNullOrWhiteSpace(actionErrorMessage))
+{
+    <div class="alert alert-danger mt-3" role="alert">
+        @actionErrorMessage
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(actionSuccessMessage))
+{
+    <div class="alert alert-success mt-3" role="status">
+        @actionSuccessMessage
+    </div>
+}
+
+@code {
+    // Contains the authenticated user's physical board game copies.
+    private List<CollectionItemResponse> items = [];
+
+    // Separate active and archived copies for display.
+    private List<CollectionItemResponse> activeItems =>
+        items.Where(item => !item.IsArchived).ToList();
+
+    private List<CollectionItemResponse> archivedItems =>
+        items.Where(item => item.IsArchived).ToList();
+
+    // Controls loading, item actions, and feedback messages.
+    private bool isLoading = true;
+    private Guid? processingItemId;
+    private string? errorMessage;
+    private string? actionErrorMessage;
+    private string? actionSuccessMessage;
+
+    // Load the authenticated user's collection when the page opens.
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCollectionAsync();
+    }
+
+    // Retrieve the authenticated user's collection from the API.
+    private async Task LoadCollectionAsync()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        try
+        {
+            var response = await Http.GetAsync(
+                "api/items/my-collection");
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                Navigation.NavigateTo("/login");
+                return;
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            items = await response.Content
+                .ReadFromJsonAsync<List<CollectionItemResponse>>() ?? [];
+        }
+        catch (HttpRequestException)
+        {
+            errorMessage =
+                "Din samling kunne ikke hentes fra API'et.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    // Archive an active physical copy owned by the authenticated user.
+    private async Task ArchiveItemAsync(Guid itemId)
+    {
+        if (processingItemId is not null)
+        {
+            return;
+        }
+
+        processingItemId = itemId;
+        actionErrorMessage = null;
+        actionSuccessMessage = null;
+
+        try
+        {
+            var response = await Http.PutAsync(
+                $"api/items/{itemId}/archive",
+                null);
+
+            if (response.StatusCode == HttpStatusCode.NoContent)
+            {
+                // Reload the collection to reflect the persisted status.
+                await LoadCollectionAsync();
+
+                if (string.IsNullOrWhiteSpace(errorMessage))
+                {
+                    actionSuccessMessage =
+                        "Spillet er nu flyttet til Arkiverede spil.";
+                }
+            }
+            else if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                actionErrorMessage =
+                    "Spillet kunne ikke arkiveres. Det kan være " +
+                    "udlånt eller allerede arkiveret.";
+            }
+            else if (response.StatusCode == HttpStatusCode.Forbidden)
+            {
+                actionErrorMessage =
+                    "Du har ikke tilladelse til at arkivere dette spil.";
+            }
+            else if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                actionErrorMessage =
+                    "Din session er udløbet. Log ind igen.";
+            }
+            else if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                actionErrorMessage =
+                    "Spillet findes ikke længere.";
+            }
+            else
+            {
+                actionErrorMessage =
+                    "Spillet kunne ikke arkiveres.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            actionErrorMessage =
+                "Der kunne ikke oprettes forbindelse til API'et.";
+        }
+        finally
+        {
+            processingItemId = null;
+        }
+    }
+
+    // Reactivate an archived physical copy owned by the authenticated user.
+    private async Task ReactivateItemAsync(Guid itemId)
+    {
+        if (processingItemId is not null)
+        {
+            return;
+        }
+
+        processingItemId = itemId;
+        actionErrorMessage = null;
+        actionSuccessMessage = null;
+
+        try
+        {
+            var response = await Http.PutAsync(
+                $"api/items/{itemId}/reactivate",
+                null);
+
+            if (response.StatusCode == HttpStatusCode.NoContent)
+            {
+                // Reload the collection to reflect the persisted status.
+                await LoadCollectionAsync();
+
+                if (string.IsNullOrWhiteSpace(errorMessage))
+                {
+                    actionSuccessMessage =
+                        "Spillet er nu flyttet tilbage til Aktive spil.";
+                }
+            }
+            else if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                actionErrorMessage =
+                    "Spillet er allerede aktivt.";
+            }
+            else if (response.StatusCode == HttpStatusCode.Forbidden)
+            {
+                actionErrorMessage =
+                    "Du har ikke tilladelse til at genaktivere dette spil.";
+            }
+            else if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                actionErrorMessage =
+                    "Din session er udløbet. Log ind igen.";
+            }
+            else if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                actionErrorMessage =
+                    "Spillet findes ikke længere.";
+            }
+            else
+            {
+                actionErrorMessage =
+                    "Spillet kunne ikke genaktiveres.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            actionErrorMessage =
+                "Der kunne ikke oprettes forbindelse til API'et.";
+        }
+        finally
+        {
+            processingItemId = null;
+        }
+    }
+}

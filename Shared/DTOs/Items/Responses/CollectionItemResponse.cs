@@ -13,4 +13,5 @@ public sealed record CollectionItemResponse
     public int MaxPlayers { get; init; }
     public int PlayingTimeMinutes { get; init; }
     public int MinimumAge { get; init; }
+    public bool IsArchived { get; init; }
 }
