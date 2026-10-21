@@ -1,19 +1,26 @@
+
 using Domain.Exceptions.CustomExceptions;
 
 namespace Domain.Models;
 
-
 public class Loan // Represents a loan of an item to a borrower
 {
     public Guid Id { get; private set; } = Guid.CreateVersion7();
+
     public DateOnly LoanDate { get; private set; }
+
     public DateOnly DueDate { get; private set; }
+
     public DateOnly? ReturnDate { get; private set; }
+
     public Guid ItemId { get; private set; }
+
     public Guid BorrowerId { get; private set; }
+
     public bool IsReturned => ReturnDate.HasValue;
-    // Used by EF Core for optimistic concurrency.
-    public byte[] RowVersion { get; private set; } = []; // Used for optimistic concurrency control
+
+    // Used by EF Core for optimistic concurrency control.
+    public byte[] RowVersion { get; private set; } = [];
 
     public bool IsOverdue
     {
@@ -28,21 +35,36 @@ public class Loan // Represents a loan of an item to a borrower
         }
     }
 
-    public Loan() //Empty EF-core constructor
+    // Required by EF Core.
+    public Loan()
     {
     }
 
     public Loan(
-    DateOnly loanDate,
-    DateOnly dueDate,
-    Guid itemId,
-    Guid borrowerId)
+        DateOnly loanDate,
+        DateOnly dueDate,
+        Guid itemId,
+        Guid borrowerId)
     {
         if (loanDate < DateOnly.FromDateTime(DateTime.Today))
+        {
             throw new LoanDateInPastException();
+        }
 
         if (dueDate <= loanDate)
+        {
             throw new DueDateException();
+        }
+
+        // New loans must have a duration of exactly 14 or 30 days.
+        var loanDuration = dueDate.DayNumber - loanDate.DayNumber;
+
+        if (loanDuration != 14 && loanDuration != 30)
+        {
+            throw new ArgumentException(
+                "Loan duration must be exactly 14 or 30 days.",
+                nameof(dueDate));
+        }
 
         LoanDate = loanDate;
         DueDate = dueDate;
@@ -50,7 +72,8 @@ public class Loan // Represents a loan of an item to a borrower
         BorrowerId = borrowerId;
     }
 
-    public void ReturnLoan(DateOnly returnDate) // Method to set the return date of the loan
+    // Set the return date of an existing loan.
+    public void ReturnLoan(DateOnly returnDate)
     {
         if (returnDate < LoanDate)
         {
@@ -60,13 +83,14 @@ public class Loan // Represents a loan of an item to a borrower
         ReturnDate = returnDate;
     }
 
-    public override string ToString() // Override the ToString method to display the loan information
+    public override string ToString()
     {
         return $"Loan {Id}: Item {ItemId}, Borrower {BorrowerId}, " +
                $"From {LoanDate} to {DueDate}, Returned: {ReturnDate}";
     }
 
     // Create historical loans for development seed data.
+    // Historical loans may have different durations.
     public static Loan CreateHistorical(
         DateOnly loanDate,
         DateOnly dueDate,
@@ -75,10 +99,14 @@ public class Loan // Represents a loan of an item to a borrower
         DateOnly? returnDate = null)
     {
         if (dueDate <= loanDate)
+        {
             throw new DueDateException();
+        }
 
         if (returnDate.HasValue && returnDate.Value < loanDate)
+        {
             throw new ReturnDateException();
+        }
 
         return new Loan
         {

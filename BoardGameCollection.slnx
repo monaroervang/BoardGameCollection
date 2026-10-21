@@ -12,7 +12,9 @@
     <Project Path="Persistence.Tests/Persistence.Tests.csproj" />
   </Folder>
   <Project Path="API/API.csproj" />
+  <Project Path="AuthenticationService/AuthenticationService.csproj" Id="4a3a802c-be6d-4adc-8968-7c0fe10d5473" />
   <Project Path="Domain/Domain.csproj" />
+  <Project Path="Gateway/Gateway.csproj" />
   <Project Path="Persistence/Persistence.csproj" />
   <Project Path="Shared/Shared.csproj" />
   <Project Path="Web/Web.csproj" Id="06a56fb6-b595-4358-b78f-97dbb154e8eb" />

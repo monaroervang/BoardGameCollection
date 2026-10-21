@@ -164,6 +164,19 @@ public class LoanController : ControllerBase
         {
             throw new DueDateException();
         }
+        // Only 14-day and 30-day loan periods are allowed.
+        var loanDuration =
+            request.DueDate.DayNumber - request.LoanDate.DayNumber;
+
+        if (loanDuration != 14 && loanDuration != 30)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid loan duration",
+                Detail = "Loan duration must be exactly 14 or 30 days."
+            });
+        }
 
         // Find the physical copy.
         var item = await _context.Items
