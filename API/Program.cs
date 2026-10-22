@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Persistence.Repositories;
 using Persistence.Seeding;
+using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -38,6 +39,7 @@ var connectionString = builder.Configuration
 var jwtKey = builder.Configuration["Jwt:Key"]
     ?? throw new InvalidOperationException(
         "JWT signing key was not found.");
+var authServiceJwtKey = builder.Configuration["AuthServiceJwt:Key"];
 
 var jwtIssuer = builder.Configuration["Jwt:Issuer"]
     ?? throw new InvalidOperationException(
@@ -67,24 +69,75 @@ builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 
 // Configure JWT bearer authentication.
 builder.Services
-    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+    .AddAuthentication("JwtSelector")
+    .AddPolicyScheme("JwtSelector", null, options =>
+    {
+
+        options.ForwardDefaultSelector = context =>
+        {
+            var authorization = context.Request.Headers.Authorization.ToString();
+
+            if (!authorization.StartsWith(
+                "Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                return "LegacyJwt";
+            }
+
+            var token = authorization["Bearer ".Length..].Trim();
+
+            if (new JwtSecurityTokenHandler().CanReadToken(token))
+            {
+                var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+                if (jwt.Issuer == "BoardGameCollection.Auth")
+                {
+                    return "AuthServiceJwt";
+                }
+            }
+
+            return "LegacyJwt";
+        };
+
+    })
+    .AddJwtBearer("LegacyJwt", options =>
+        {
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidIssuer = jwtIssuer,
+
+                ValidateAudience = true,
+                ValidAudience = jwtAudience,
+
+                ValidateLifetime = true,
+
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(
+                    Encoding.UTF8.GetBytes(jwtKey)),
+
+                // Tokens expire exactly at their expiration time.
+                ClockSkew = TimeSpan.Zero
+            };
+        })
+
+    .AddJwtBearer("AuthServiceJwt", options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-            ValidIssuer = jwtIssuer,
+            ValidIssuer = "BoardGameCollection.Auth",
 
             ValidateAudience = true,
-            ValidAudience = jwtAudience,
+            ValidAudience = "BoardGameCollection.Api",
 
             ValidateLifetime = true,
 
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(jwtKey)),
+                Encoding.UTF8.GetBytes(
+                    authServiceJwtKey ?? throw new InvalidOperationException(
+                        "AuthenticationService JWT key was not found."))),
 
-            // Tokens expire exactly at their expiration time.
             ClockSkew = TimeSpan.Zero
         };
     });

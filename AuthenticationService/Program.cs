@@ -1,5 +1,9 @@
 using AuthenticationService.Contracts;
+using AuthenticationService.Data;
+using AuthenticationService.Models;
+using AuthenticationService.Services;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using MySql.Data.MySqlClient;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,23 +18,29 @@ builder.Services.AddScoped<
     IPasswordHasher<string>,
     PasswordHasher<string>>();
 
+builder.Services.AddScoped<JwtTokenService>(); // Register the JwtTokenService for dependency injection.
+
+builder.Services.AddDbContext<AuthDbContext>(options => // Register the AuthDbContext for dependency injection.
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("AuthDb"))); // Use SQL Server for the AuthDbContext.
+
 var app = builder.Build();
 
 app.MapGet("/health", () =>
     Results.Ok("AuthenticationService is running"));
 
-app.MapGet("/health/database", async () =>
+app.MapGet("/health/database", async (AuthDbContext db) =>
 {
-    using var connection = new MySqlConnection(connectionString);
-    await connection.OpenAsync();
-
-    return Results.Ok("Connected to MySQL");
+    return await db.Database.CanConnectAsync()
+        ? Results.Ok("Connected to SQL Server")
+        : Results.Problem("Cannot connect to SQL Server");
 });
 
 // Register a user with a hashed password.
 app.MapPost("/register", async Task<IResult> (
     UserLoginRequest request,
-    IPasswordHasher<string> passwordHasher) =>
+    IPasswordHasher<string> passwordHasher,
+    AuthDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(request.Username) ||
         string.IsNullOrWhiteSpace(request.Password))
@@ -57,26 +67,28 @@ app.MapPost("/register", async Task<IResult> (
         username,
         request.Password);
 
-    using var connection = new MySqlConnection(connectionString);
-    await connection.OpenAsync();
+    if (await db.Users.AnyAsync(user => user.Username == username))
+    {
+        return Results.Conflict("Username is already taken.");
+    }
 
-    using var command = new MySqlCommand(
-        """
-        INSERT INTO Users (Username, PasswordHash)
-        VALUES (@username, @passwordHash);
-        """,
-        connection);
+    var user = new AuthUser
+    {
+        Username = username,
+        PasswordHash = passwordHash,
+        Role = "User"
+    };
 
-    command.Parameters.AddWithValue("@username", username);
-    command.Parameters.AddWithValue("@passwordHash", passwordHash);
+    db.Users.Add(user);
 
     try
     {
-        await command.ExecuteNonQueryAsync();
-
+        await db.SaveChangesAsync();
         return Results.Ok("User registered!");
     }
-    catch (MySqlException exception) when (exception.Number == 1062)
+    catch (DbUpdateException ex)
+        when (ex.InnerException is Microsoft.Data.SqlClient.SqlException sqlEx
+              && (sqlEx.Number == 2601 || sqlEx.Number == 2627))
     {
         return Results.Conflict("Username is already taken.");
     }
@@ -84,50 +96,51 @@ app.MapPost("/register", async Task<IResult> (
 
 // Verify the user's username and password.
 app.MapPost("/login", async Task<IResult> (
-        UserLoginRequest request,
-        IPasswordHasher<string> passwordHasher) =>
+    UserLoginRequest request,
+    IPasswordHasher<string> passwordHasher,
+    AuthDbContext db,
+    JwtTokenService jwtTokenService) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Username) ||
+        string.IsNullOrWhiteSpace(request.Password))
     {
-        if (string.IsNullOrWhiteSpace(request.Username) ||
-            string.IsNullOrWhiteSpace(request.Password))
-        {
-            return Results.BadRequest(
-                "Username and password are required.");
-        }
+        return Results.BadRequest(
+            "Username and password are required.");
+    }
 
-        var username = request.Username.Trim();
+    var username = request.Username.Trim();
 
-        using var connection = new MySqlConnection(connectionString);
-        await connection.OpenAsync();
+    var user = await db.Users
+.SingleOrDefaultAsync(user => user.Username == username);
 
-        using var command = new MySqlCommand(
-            """
-        SELECT PasswordHash
-        FROM Users
-        WHERE Username = @username;
-        """,
-            connection);
+    if (user is null)
+    {
+        return Results.Unauthorized();
+    }
 
-        command.Parameters.AddWithValue("@username", username);
+    var storedHash = user.PasswordHash;
 
-        var result = await command.ExecuteScalarAsync();
-
-        if (result is not string storedHash)
-        {
-            return Results.Unauthorized();
-        }
-
-        var verification = passwordHasher.VerifyHashedPassword(
+    var verification = passwordHasher.VerifyHashedPassword(
             username,
             storedHash,
             request.Password);
 
-        if (verification == PasswordVerificationResult.Failed)
-        {
-            return Results.Unauthorized();
-        }
+    if (verification == PasswordVerificationResult.Failed)
+    {
+        return Results.Unauthorized();
+    }
 
-        return Results.Ok("Login successful!");
-    
+    var token = jwtTokenService.GenerateToken(
+    user.Id,
+    user.Username,
+    user.Role);
+
+    return Results.Ok(new LoginResponse(
+        user.Id,
+        user.Username,
+        user.Role,
+        token));
+
 });
 
 app.Run();
