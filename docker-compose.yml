@@ -5,9 +5,20 @@
       ASPNETCORE_URLS: http://+:5000
       ReverseProxy__Clusters__authCluster__Destinations__auth__Address: "http://authenticationservice:5000/"
     ports:
-      - "127.0.0.1:8080:5000"
+      - "8080:5000"
     depends_on:
       - authenticationservice
+  
+  authenticationservice:
+    build: ./AuthenticationService
+    environment:
+      ASPNETCORE_URLS: http://+:5000
+      ConnectionStrings__Default: "Server=usersdb;Port=3306;Database=usersdb;User=authuser;Password=authsecret;"
+    ports:
+      - "5050:5000"
+    depends_on:
+      - usersdb
+
   usersdb:
     image: mysql:8.0
     environment:
@@ -16,20 +27,12 @@
       MYSQL_USER: authuser
       MYSQL_PASSWORD: authsecret
     ports:
-      - "127.0.0.1:3307:3306"
+      - "3307:3306"
     volumes:
       - auth_db_data:/var/lib/mysql
       - ./AuthenticationService/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
-  authenticationservice:
-    build: ./AuthenticationService
-    environment:
-      ASPNETCORE_URLS: http://+:5000
-      ConnectionStrings__Default: "Server=usersdb;Port=3306;Database=usersdb;User=authuser;Password=authsecret;"
-    ports:
-      - "127.0.0.1:5050:5000"
-    depends_on:
-      - usersdb
+  
 
 volumes:
   auth_db_data:
