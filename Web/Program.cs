@@ -15,6 +15,15 @@ builder.Services.AddScoped(
         BaseAddress = new Uri("https://localhost:7102/")
     });
 
+// HTTP client for the AuthenticationService microservice.
+builder.Services.AddHttpClient(
+    "AuthenticationService",
+    client =>
+    {
+        client.BaseAddress =
+            new Uri("https://localhost:7006/");
+    });
+
 // Register Blazor authentication services.
 builder.Services.AddAuthorizationCore();
 

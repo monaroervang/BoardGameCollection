@@ -4,14 +4,8 @@ using AuthenticationService.Models;
 using AuthenticationService.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using MySql.Data.MySqlClient;
 
 var builder = WebApplication.CreateBuilder(args);
-
-var connectionString = builder.Configuration
-    .GetConnectionString("Default")
-    ?? throw new InvalidOperationException(
-        "Connection string 'Default' was not found.");
 
 // Register the password hasher for dependency injection.
 builder.Services.AddScoped<
@@ -24,7 +18,21 @@ builder.Services.AddDbContext<AuthDbContext>(options => // Register the AuthDbCo
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("AuthDb"))); // Use SQL Server for the AuthDbContext.
 
+// Allow requests from the Blazor frontend.
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("BlazorFrontend", policy =>
+    {
+        policy
+            .WithOrigins("https://localhost:7278")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
 var app = builder.Build();
+
+app.UseCors("BlazorFrontend");
 
 app.MapGet("/health", () =>
     Results.Ok("AuthenticationService is running"));
